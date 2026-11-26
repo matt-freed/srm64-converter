@@ -42,7 +42,7 @@ func newRoot(out io.Writer) *cobra.Command {
 	}
 	root.SetOut(out)
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
-	root.AddCommand(inspectCmd(), splitCmd(), packCmd())
+	root.AddCommand(inspectCmd(), splitCmd(), packCmd(), insertCmd())
 	return root
 }
 

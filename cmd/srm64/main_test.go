@@ -115,6 +115,151 @@ func TestPackInfersOutput(t *testing.T) {
 	}
 }
 
+// TestInsert checks that insert changes only the regions it is given, updates
+// the .srm in place by default, and leaves it untouched with -o.
+func TestInsert(t *testing.T) {
+	dir := t.TempDir()
+	eep := filepath.Join(dir, "a.eep")
+	randFile(t, eep, 6, 512)
+	srmPath := filepath.Join(dir, "g.srm")
+	if _, err := run(t, "pack", "-o", srmPath, eep); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(srmPath)
+
+	pak := randFile(t, filepath.Join(dir, "b.2.mpk"), 7, 0x8000)
+	copy(pak[0x300:], "NTST01")
+	os.WriteFile(filepath.Join(dir, "b.2.mpk"), pak, 0o644)
+	eep2 := randFile(t, filepath.Join(dir, "c.eep"), 8, 512)
+
+	// -o writes a new file and leaves the input alone.
+	other := filepath.Join(dir, "other.srm")
+	if _, err := run(t, "insert", srmPath, filepath.Join(dir, "b.2.mpk"), "-o", other); err != nil {
+		t.Fatal(err)
+	}
+	if now, _ := os.ReadFile(srmPath); !bytes.Equal(now, before) {
+		t.Error("insert -o modified the input .srm")
+	}
+	if _, err := run(t, "insert", srmPath, filepath.Join(dir, "b.2.mpk"), "-o", other); err == nil {
+		t.Error("insert -o overwrote an existing file without -f")
+	}
+
+	// In place: pak 2 and EEPROM change, every other byte stays.
+	out, err := run(t, "insert", srmPath, filepath.Join(dir, "b.2.mpk"), filepath.Join(dir, "c.eep"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains([]byte(out), []byte("EEPROM (replaced existing data)")) {
+		t.Errorf("insert did not note the replaced EEPROM:\n%s", out)
+	}
+	if bytes.Contains([]byte(out), []byte("Controller Pak 2 (replaced")) {
+		t.Errorf("insert called a blank pak replaced:\n%s", out)
+	}
+	after, _ := os.ReadFile(srmPath)
+	want := bytes.Clone(before)
+	copy(want[0:512], eep2)
+	copy(want[0x8800:0x10800], pak)
+	if !bytes.Equal(after, want) {
+		t.Error("in-place insert changed bytes outside the inserted regions, or missed some")
+	}
+	if b, _ := os.ReadFile(other); !bytes.Equal(b[0x8800:0x10800], pak) {
+		t.Error("insert -o output is missing the pak")
+	}
+}
+
+// TestInsertPakSlots walks the slot rules in order: --slot, then a .N.mpk
+// name, then the first unused slot, then an error asking for --slot.
+func TestInsertPakSlots(t *testing.T) {
+	dir := t.TempDir()
+	mkPak := func(name string, seed uint64) string {
+		p := filepath.Join(dir, name)
+		b := randFile(t, p, seed, 0x8000)
+		copy(b[0x300:], "NTST01")
+		if err := os.WriteFile(p, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	slotOf := func(srmPath, pak string) int {
+		t.Helper()
+		img, _ := os.ReadFile(srmPath)
+		want, _ := os.ReadFile(pak)
+		for s := 1; s <= 4; s++ {
+			off := 0x800 + (s-1)*0x8000
+			if bytes.Equal(img[off:off+0x8000], want) {
+				return s
+			}
+		}
+		return 0
+	}
+
+	srmPath := filepath.Join(dir, "g.srm")
+	p1 := mkPak("first.mpk", 10)
+	if _, err := run(t, "pack", "-o", srmPath, p1); err != nil {
+		t.Fatal(err)
+	}
+	if s := slotOf(srmPath, p1); s != 1 {
+		t.Fatalf("pack put an unnumbered pak in slot %d, want 1", s)
+	}
+
+	// No slot given: first unused slot, skipping used pak 1.
+	p2 := mkPak("second.mpk", 11)
+	if _, err := run(t, "insert", srmPath, p2); err != nil {
+		t.Fatal(err)
+	}
+	if s := slotOf(srmPath, p2); s != 2 {
+		t.Errorf("auto slot = %d, want 2", s)
+	}
+
+	// .N.mpk name wins over auto.
+	p4 := mkPak("third.4.mpk", 12)
+	if _, err := run(t, "insert", srmPath, p4); err != nil {
+		t.Fatal(err)
+	}
+	if s := slotOf(srmPath, p4); s != 4 {
+		t.Errorf(".4.mpk slot = %d, want 4", s)
+	}
+
+	// --slot wins over the name, and may replace a used slot.
+	p3 := mkPak("fourth.4.mpk", 13)
+	out, err := run(t, "insert", "--slot", "1", srmPath, p3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := slotOf(srmPath, p3); s != 1 {
+		t.Errorf("--slot 1 put pak in slot %d", s)
+	}
+	if !bytes.Contains([]byte(out), []byte("Controller Pak 1 (replaced existing data)")) {
+		t.Errorf("--slot over a used slot not reported as replaced:\n%s", out)
+	}
+
+	// Fill slot 3, then an unnumbered pak has nowhere to go.
+	if _, err := run(t, "insert", srmPath, mkPak("fifth.mpk", 14)); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(srmPath)
+	_, err = run(t, "insert", srmPath, mkPak("sixth.mpk", 15))
+	var ue usageError
+	if !errors.As(err, &ue) || !bytes.Contains([]byte(err.Error()), []byte("--slot")) {
+		t.Errorf("full .srm: err = %v, want a usage error mentioning --slot", err)
+	}
+	if after, _ := os.ReadFile(srmPath); !bytes.Equal(before, after) {
+		t.Error("failed insert modified the .srm")
+	}
+
+	// --slot misuse.
+	randFile(t, filepath.Join(dir, "a.eep"), 16, 512)
+	for _, a := range [][]string{
+		{"insert", "--slot", "5", srmPath, p2},
+		{"insert", "--slot", "2", srmPath, p2, p3},
+		{"insert", "--slot", "2", srmPath, filepath.Join(dir, "a.eep")},
+	} {
+		if _, err := run(t, a...); !errors.As(err, &ue) {
+			t.Errorf("%v: err = %v, want a usage error", a[1:3], err)
+		}
+	}
+}
+
 func TestCLIErrors(t *testing.T) {
 	dir := t.TempDir()
 	eep := filepath.Join(dir, "input.eep") // split of g.srm writes g.eep beside it
@@ -136,6 +281,9 @@ func TestCLIErrors(t *testing.T) {
 		{"bad eep size", []string{"split", "--eep-size", "1k", srmPath}, true},
 		{"inspect not srm", []string{"inspect", eep}, false},
 		{"inspect no args", []string{"inspect"}, true},
+		{"pack --base removed", []string{"pack", "--base", srmPath, "-o", filepath.Join(dir, "x.srm"), eep}, true},
+		{"insert no natives", []string{"insert", srmPath}, true},
+		{"insert into non-srm", []string{"insert", eep, eep}, false},
 	}
 	// Split once so the overwrite case has something to collide with.
 	if _, err := run(t, "split", srmPath); err != nil {

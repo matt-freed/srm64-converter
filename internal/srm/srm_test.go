@@ -2,7 +2,10 @@ package srm
 
 import (
 	"bytes"
+	"errors"
+	"maps"
 	"math/rand/v2"
+	"slices"
 	"testing"
 )
 
@@ -88,16 +91,35 @@ func split(img *Image) map[string][]byte {
 	return files
 }
 
-// pack builds an image from files the way the pack command does.
+// pack builds an image from files the way the pack command does: pak slots
+// come from AssignPakSlots, and files are placed in name order.
 func pack(t *testing.T, files map[string][]byte) *Image {
 	t.Helper()
 	img := Blank()
-	for name, data := range files {
+	names := slices.Sorted(maps.Keys(files))
+	kinds := make([]Kind, len(names))
+	slots := make([]int, len(names))
+	var paks, requested []int
+	for i, name := range names {
 		k, slot, err := KindFromPath(name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := img.Place(k, slot, data); err != nil {
+		kinds[i], slots[i] = k, slot
+		if k == MPK && len(files[name]) == PakSize {
+			paks = append(paks, i)
+			requested = append(requested, slot)
+		}
+	}
+	assigned, _, err := AssignPakSlots(img, requested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for j, i := range paks {
+		slots[i] = assigned[j]
+	}
+	for i, name := range names {
+		if _, err := img.Place(kinds[i], slots[i], files[name]); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
@@ -279,10 +301,12 @@ func TestKindFromPath(t *testing.T) {
 		{"a/Game.eep", EEP, 0, false},
 		{"Game.SRA", SRA, 0, false},
 		{"Game.fla", FLA, 0, false},
-		{"Game.mpk", MPK, 1, false},
+		{"Game.mpk", MPK, 0, false}, // 0 = no slot given
+		{"Game.1.mpk", MPK, 1, false},
 		{"Game.3.mpk", MPK, 3, false},
-		{"Game.5.mpk", MPK, 1, false},
-		{"Mario 64.mpk", MPK, 1, false},
+		{"Game.5.mpk", MPK, 0, false},
+		{"Game.0.mpk", MPK, 0, false},
+		{"Mario 64.mpk", MPK, 0, false},
 		{"Game.srm", 0, 0, true},
 	}
 	for _, c := range cases {
@@ -300,6 +324,7 @@ func TestBaseName(t *testing.T) {
 		"Game.mpk":           "Game",
 		"Game.3.mpk":         "Game",
 		"Game.5.mpk":         "Game.5", // not a slot suffix
+		"Game.0.mpk":         "Game.0",
 		"Mario 64 (USA).fla": "Mario 64 (USA)",
 		"v1.2/Game.eep":      "v1.2/Game",
 	}
@@ -315,6 +340,8 @@ func TestBaseName(t *testing.T) {
 	}
 }
 
+// Pak 1 is written without a suffix, so its slot comes back as 0 (not given),
+// which AssignPakSlots resolves to slot 1 in a blank image.
 func TestNativeNameInvertsKindFromPath(t *testing.T) {
 	for _, r := range Regions {
 		name := NativeName("Some Game (USA)", r)
@@ -322,9 +349,64 @@ func TestNativeNameInvertsKindFromPath(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if k == MPK && slot == 0 {
+			s, _, err := AssignPakSlots(Blank(), []int{0})
+			if err != nil {
+				t.Fatal(err)
+			}
+			slot = s[0]
+		}
 		got, err := RegionFor(k, slot)
 		if err != nil || got != r {
 			t.Errorf("%s -> %q -> %v, want %s", r.Label(), name, got.Label(), r.Label())
 		}
+	}
+}
+
+func TestAssignPakSlots(t *testing.T) {
+	// usedImg returns a blank image with notes in the given pak slots.
+	usedImg := func(used ...int) *Image {
+		img := Blank()
+		for _, s := range used {
+			r, _ := RegionFor(MPK, s)
+			copy(img.Bytes(r), pakWithNotes(uint64(s), 1))
+		}
+		return img
+	}
+	cases := []struct {
+		name      string
+		used      []int
+		requested []int
+		want      []int
+		bad       int // index of the pak that didn't fit; -1 if none
+	}{
+		{"blank, one auto", nil, []int{0}, []int{1}, -1},
+		{"blank, autos fill in order", nil, []int{0, 0, 0}, []int{1, 2, 3}, -1},
+		{"skips used slots", []int{1, 2}, []int{0}, []int{3}, -1},
+		{"requested kept", nil, []int{3}, []int{3}, -1},
+		{"requested may replace used", []int{2}, []int{2}, []int{2}, -1},
+		{"auto avoids requested, even later ones", nil, []int{0, 1}, []int{2, 1}, -1},
+		{"auto fills a gap", []int{1, 3}, []int{0, 0}, []int{2, 4}, -1},
+		{"all used", []int{1, 2, 3, 4}, []int{0}, nil, 0},
+		{"used + requested leave no room", []int{1, 2, 3}, []int{4, 0}, nil, 1},
+		{"too many autos", nil, []int{0, 0, 0, 0, 0}, nil, 4},
+		{"all used, requested ok", []int{1, 2, 3, 4}, []int{4}, []int{4}, -1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, bad, err := AssignPakSlots(usedImg(c.used...), c.requested)
+			if c.bad >= 0 {
+				if !errors.Is(err, ErrNoFreePak) || bad != c.bad {
+					t.Fatalf("got %v, bad=%d, err=%v; want ErrNoFreePak at %d", got, bad, err, c.bad)
+				}
+				return
+			}
+			if err != nil || !slices.Equal(got, c.want) {
+				t.Errorf("got %v, %v; want %v", got, err, c.want)
+			}
+		})
+	}
+	if _, _, err := AssignPakSlots(Blank(), []int{5}); err == nil || errors.Is(err, ErrNoFreePak) {
+		t.Errorf("slot 5: err = %v, want a range error", err)
 	}
 }

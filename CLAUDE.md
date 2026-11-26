@@ -38,7 +38,14 @@ gofmt -l .                      # must print nothing
   - Commands print to `cmd.OutOrStdout()`, which is the buffered `stdout` flushed in
     `main`. Don't write to `os.Stdout` directly. Warnings go to stderr.
   - Files are written through `writeFile`, which is atomic and refuses to overwrite
-    unless `-f` is given.
+    unless `-f` is given. The one exception is `insert` updating its own input `.srm`,
+    which it always does. `-f` only matters for `insert -o`.
+  - `pack` always builds a new `.srm` from blank, and `insert` edits an existing one.
+    Both share `placeFiles` in `pack.go`.
+  - Pak slot rules (`--slot`, then `.N.mpk`, then the first unused slot, then an
+    error) are specified in `SRM_SPEC.md` under *Pak slot selection*.
+    `srm.AssignPakSlots` implements them. `KindFromPath` returns slot 0 for "no slot
+    in the name", so don't treat 0 as slot 1 anywhere.
 
 ## Layout
 

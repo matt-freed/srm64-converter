@@ -133,15 +133,41 @@ and map it to slots 1–4.
 3. For each pak slot in use, write `<name>.mpk` for slot 1 and `<name>.<N>.mpk`
    for slots 2–4. Copy the full 32 KB slot.
 
-### Pack (native → SRM)
-1. Start from a base image: an existing `.srm` when merging, otherwise a blank image
-   (`0xFF` for the cart regions, plus 4 formatted blank paks).
+### Pack (native → new SRM)
+1. Start from a blank image (`0xFF` for the cart regions, plus 4 formatted blank paks).
 2. Copy each native file to its region's offset:
    - `.eep` (512 or 2,048 B) goes to offset 0. Pad the rest of the 2 KB with `0xFF`.
    - `.sra` (32,768 B) goes to `0x20800`.
    - `.fla` (131,072 B) goes to `0x28800`.
-   - `.mpk` (32,768 B) goes to `0x800 + slot*0x8000`. A 131,072 B file goes to `0x800`.
+   - `.mpk` (32,768 B) for pak N goes to `0x800 + (N-1)*0x8000`. A 131,072 B file
+     goes to `0x800` and fills all four paks.
 3. Reject native files whose size does not match.
+
+### Insert (native → existing SRM)
+The same as Pack, but step 1 starts from an existing `.srm`. Only the regions the
+native files cover change, and every other byte is kept.
+
+### Pak slot selection (Pack and Insert)
+A 32 KB `.mpk` goes in the first slot that applies, by these rules in order:
+
+1. **`--slot N`** (1–4), if given. Only allowed when exactly one `.mpk` file is given,
+   and not with a 128 KB file.
+2. **The file name**, if it ends `.N.mpk` with N from 1 to 4 (e.g. `Game.3.mpk`).
+   Any other number (`Game.5.mpk`) is part of the name, not a slot.
+3. **The first unused slot:** the lowest-numbered slot that has no notes (see
+   *Detecting what is in use*) and that no other file in the same command claims.
+4. **No unused slot:** fail without writing anything, and ask the user to pass `--slot N`.
+
+Rules 1 and 2 replace whatever the slot holds. All files claiming a slot through
+rules 1 and 2 are resolved before any rule-3 file is placed, so a rule-3 file never
+takes a slot that a later file names. Rule-3 files fill slots in argument order. Two
+files that end up in the same slot are an error. A 128 KB `.mpk` always fills all
+four slots.
+
+For Pack the base image is blank, so rule 3 gives slots 1, 2, 3, 4 in order. Split
+writes pak 1 without a number (`Game.mpk`), so re-packing a split works. Inserting
+that `Game.mpk` back into an `.srm` whose pak 1 is in use puts it in the next free
+slot instead. To replace pak 1, use `--slot 1` or name the file `Game.1.mpk`.
 
 Blank pak: either port `format_mempak()` to Go, or embed a 32 KB blank-pak template
 taken from an unused slot of a real `.srm`. This tool embeds a template.

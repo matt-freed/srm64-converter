@@ -2,6 +2,7 @@ package srm
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -42,12 +43,52 @@ func NativeName(base string, r Region) string {
 // ("dir/Game.3.mpk" gives "dir/Game"). It inverts NativeName.
 func BaseName(path string) string {
 	base := strings.TrimSuffix(path, filepath.Ext(path))
-	if k, slot, err := KindFromPath(path); err == nil && k == MPK {
+	if k, slot, err := KindFromPath(path); err == nil && k == MPK && slot != 0 {
 		if s := fmt.Sprintf(".%d", slot); strings.HasSuffix(base, s) {
 			base = strings.TrimSuffix(base, s)
 		}
 	}
 	return base
+}
+
+// ErrNoFreePak is returned by AssignPakSlots when a pak has no slot given and
+// every slot is already in use or claimed.
+var ErrNoFreePak = errors.New("no unused Controller Pak slot")
+
+// AssignPakSlots resolves the slot for each pak to be placed into img.
+// requested[i] is the slot asked for (1-4), or 0 if none was given. Requested
+// slots are kept as they are, even if that slot holds data (it is replaced).
+// Each 0 gets the lowest-numbered slot that is unused in img (IsUsed is false)
+// and not requested or already assigned to another pak, in order. If none is
+// left, it returns ErrNoFreePak with the index of the pak that didn't fit.
+func AssignPakSlots(img *Image, requested []int) ([]int, int, error) {
+	slots := make([]int, len(requested))
+	taken := map[int]bool{}
+	for i, s := range requested {
+		if s < 0 || s > Paks {
+			return nil, i, fmt.Errorf("pak slot %d out of range (want 1-%d)", s, Paks)
+		}
+		slots[i] = s
+		if s != 0 {
+			taken[s] = true
+		}
+	}
+	for i, s := range slots {
+		if s != 0 {
+			continue
+		}
+		for c := 1; c <= Paks && slots[i] == 0; c++ {
+			r, _ := RegionFor(MPK, c)
+			if !taken[c] && !img.IsUsed(r) {
+				slots[i] = c
+				taken[c] = true
+			}
+		}
+		if slots[i] == 0 {
+			return nil, i, ErrNoFreePak
+		}
+	}
+	return slots, -1, nil
 }
 
 // GuessEEPSize returns 512 if everything past the first 512 bytes of the
@@ -62,7 +103,9 @@ func GuessEEPSize(eep []byte) int {
 }
 
 // KindFromPath identifies a native file by its extension. A pak may carry a
-// slot suffix, as in "game.2.mpk" (slots 1-4); without one the slot is 1.
+// slot suffix, as in "game.2.mpk" (slots 1-4). For a pak without one the
+// returned slot is 0, meaning "not specified" (see AssignPakSlots). For cart
+// types the slot is always 0.
 func KindFromPath(path string) (Kind, int, error) {
 	base := filepath.Base(path)
 	ext := strings.ToLower(filepath.Ext(base))
@@ -80,7 +123,7 @@ func KindFromPath(path string) (Kind, int, error) {
 				return MPK, n, nil
 			}
 		}
-		return MPK, 1, nil
+		return MPK, 0, nil
 	}
 	return 0, 0, fmt.Errorf("%s: unknown save type %q (want .eep, .sra, .fla or .mpk)", path, ext)
 }
