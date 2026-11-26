@@ -38,6 +38,18 @@ func NativeName(base string, r Region) string {
 	return base + "." + r.Kind.Ext()
 }
 
+// BaseName returns path without its extension, and without a pak slot suffix
+// ("dir/Game.3.mpk" gives "dir/Game"). It inverts NativeName.
+func BaseName(path string) string {
+	base := strings.TrimSuffix(path, filepath.Ext(path))
+	if k, slot, err := KindFromPath(path); err == nil && k == MPK {
+		if s := fmt.Sprintf(".%d", slot); strings.HasSuffix(base, s) {
+			base = strings.TrimSuffix(base, s)
+		}
+	}
+	return base
+}
+
 // GuessEEPSize returns 512 if everything past the first 512 bytes of the
 // EEPROM region is 0xFF (a 4 Kbit cart), otherwise 2048. The .srm does not
 // record the real size, so a 16 Kbit save that has not yet written past byte

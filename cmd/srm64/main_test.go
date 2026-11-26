@@ -94,6 +94,27 @@ func TestCLIRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPackInfersOutput checks that pack without -o names the .srm after the
+// first file, dropping a pak slot suffix, and writes it beside that file.
+func TestPackInfersOutput(t *testing.T) {
+	dir := t.TempDir()
+	pak := filepath.Join(dir, "My Game.2.mpk")
+	randFile(t, pak, 4, 0x8000)
+	eep := filepath.Join(dir, "My Game.eep")
+	randFile(t, eep, 5, 512)
+
+	if _, err := run(t, "pack", pak, eep); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "My Game.srm")); err != nil || fi.Size() != 296960 {
+		t.Fatalf("inferred output not written correctly: %v", err)
+	}
+	// The inferred name obeys the overwrite guard too.
+	if _, err := run(t, "pack", eep); err == nil {
+		t.Error("pack overwrote the inferred .srm without -f")
+	}
+}
+
 func TestCLIErrors(t *testing.T) {
 	dir := t.TempDir()
 	eep := filepath.Join(dir, "input.eep") // split of g.srm writes g.eep beside it
@@ -110,7 +131,6 @@ func TestCLIErrors(t *testing.T) {
 	}{
 		{"pack overwrite", []string{"pack", "-o", srmPath, eep}, false},
 		{"split overwrite", []string{"split", srmPath}, false},
-		{"pack no -o", []string{"pack", eep}, true},
 		{"pack duplicate", []string{"pack", "-o", filepath.Join(dir, "x.srm"), eep, eep}, true},
 		{"pack unknown ext", []string{"pack", "-o", filepath.Join(dir, "x.srm"), srmPath}, true},
 		{"bad eep size", []string{"split", "--eep-size", "1k", srmPath}, true},

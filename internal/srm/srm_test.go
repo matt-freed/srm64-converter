@@ -293,6 +293,28 @@ func TestKindFromPath(t *testing.T) {
 	}
 }
 
+func TestBaseName(t *testing.T) {
+	cases := map[string]string{
+		"dir/Game.eep":       "dir/Game",
+		"Game.SRA":           "Game",
+		"Game.mpk":           "Game",
+		"Game.3.mpk":         "Game",
+		"Game.5.mpk":         "Game.5", // not a slot suffix
+		"Mario 64 (USA).fla": "Mario 64 (USA)",
+		"v1.2/Game.eep":      "v1.2/Game",
+	}
+	for in, want := range cases {
+		if got := BaseName(in); got != want {
+			t.Errorf("BaseName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for _, r := range Regions {
+		if got := BaseName(NativeName("Some Game", r)); got != "Some Game" {
+			t.Errorf("BaseName(NativeName(%s)) = %q", r.Label(), got)
+		}
+	}
+}
+
 func TestNativeNameInvertsKindFromPath(t *testing.T) {
 	for _, r := range Regions {
 		name := NativeName("Some Game (USA)", r)

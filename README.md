@@ -34,7 +34,7 @@ go vet ./... && go test ./...
 ```sh
 srm64 inspect "Game.srm"                    # which regions hold data, pak notes
 srm64 split "Game.srm" [-o DIR] [-f]        # writes Game.eep / .sra / .fla / .mpk
-srm64 pack -o "Game.srm" Game.eep [Game.mpk ...]
+srm64 pack Game.eep [Game.mpk ...] [-o OUT.srm]  # writes Game.srm
 srm64 pack -o "Game.srm" --base old.srm Game.mpk   # merge into an existing .srm
 ```
 
@@ -45,7 +45,8 @@ srm64 pack -o "Game.srm" --base old.srm Game.mpk   # merge into an existing .srm
   `--eep-size 512|2048` to choose the size yourself.
 - **Pack** reads each file's type from its extension. A file named `GAME.N.mpk` goes in
   pak slot N, and a 128 KB `.mpk` fills all four slots. Regions you don't supply stay blank,
-  the same as a new save the emulator creates.
+  the same as a new save the emulator creates. Without `-o`, the output is named after
+  the first file and written beside it: `Game.eep` or `Game.2.mpk` gives `Game.srm`.
 - Neither command overwrites an existing file unless you pass `-f`.
 - Exit codes: 0 for success, 1 for an error, 2 for a bad command line.
 

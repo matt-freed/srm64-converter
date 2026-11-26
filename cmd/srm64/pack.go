@@ -15,7 +15,7 @@ func packCmd() *cobra.Command {
 		force bool
 	)
 	cmd := &cobra.Command{
-		Use:   "pack -o OUT.srm NATIVE...",
+		Use:   "pack [-o OUT.srm] NATIVE...",
 		Short: "Build an .srm from native save files",
 		Long: `Build an .srm from native save files.
 
@@ -24,11 +24,14 @@ Each file's type comes from its extension: .eep (512 or 2048 B), .sra
 GAME.N.mpk (N = 1-4); a 128 KB .mpk fills all four slots.
 
 Regions without a file are blank, as the emulator would create them. With
---base, the files are merged into an existing .srm instead.`,
+--base, the files are merged into an existing .srm instead.
+
+Without -o, the output is named after the first file: GAME.eep or
+GAME.2.mpk gives GAME.srm in the same directory.`,
 		Args: args(cobra.MinimumNArgs(1)),
 		RunE: func(cmd *cobra.Command, a []string) error {
 			if out == "" {
-				return usagef("-o OUT.srm is required")
+				out = srm.BaseName(a[0]) + ".srm"
 			}
 			img := srm.Blank()
 			if base != "" {
@@ -75,7 +78,7 @@ Regions without a file are blank, as the emulator would create them. With
 		},
 	}
 	f := cmd.Flags()
-	f.StringVarP(&out, "output", "o", "", "the .srm file to write (required)")
+	f.StringVarP(&out, "output", "o", "", "the .srm file to write (default: first file's name with .srm)")
 	f.StringVar(&base, "base", "", "existing .srm to merge the files into")
 	f.BoolVarP(&force, "force", "f", false, "overwrite OUT.srm if it exists")
 	return cmd
