@@ -71,6 +71,7 @@ go vet ./... && go test ./...
 
 ```sh
 srm64 inspect "Game.srm"                                       # which regions hold data, pak notes
+srm64 inspect Game.eep                                         # size, status and notes of a native file
 srm64 split "Game.srm" [-o DIR] [-f]                           # writes Game.eep / .sra / .fla / .mpk
 srm64 pack Game.eep [Game.mpk ...] [-o OUT.srm] [-f]           # writes Game.srm
 srm64 insert "Game.srm" Game.mpk [--slot N] [-o OUT.srm] [-f]  # add files to an existing .srm

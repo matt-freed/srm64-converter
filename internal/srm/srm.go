@@ -125,8 +125,14 @@ func (img *Image) Bytes(r Region) []byte {
 // IsUsed reports whether r holds save data. Cart regions are in use if any
 // byte is not 0xFF. A pak is in use if its note table has any entries.
 func (img *Image) IsUsed(r Region) bool {
-	b := img.Bytes(r)
-	if r.Kind == MPK {
+	return HasData(r.Kind, img.Bytes(r))
+}
+
+// HasData reports whether b, the contents of a region or a native file of
+// kind k, holds save data: any byte not 0xFF for cart types, any note-table
+// entry for a 32 KB pak.
+func HasData(k Kind, b []byte) bool {
+	if k == MPK {
 		return len(Notes(b)) > 0
 	}
 	return CountNonFF(b) > 0

@@ -132,32 +132,17 @@ func KindFromPath(path string) (Kind, int, error) {
 // the rest of the region is filled with 0xFF. A 128 KB .mpk fills all four
 // pak slots and slot is ignored. It returns the regions written.
 func (img *Image) Place(k Kind, slot int, data []byte) ([]Region, error) {
-	switch k {
-	case EEP:
-		if len(data) != EEP4KSize && len(data) != EEP16KSize {
-			return nil, sizeErr(k, len(data), EEP4KSize, EEP16KSize)
+	if err := CheckNativeSize(k, len(data)); err != nil {
+		return nil, err
+	}
+	if k == MPK && len(data) == MPK4Size {
+		var rs []Region
+		for i := range Paks {
+			r, _ := RegionFor(MPK, i+1)
+			copy(img.Bytes(r), data[i*PakSize:(i+1)*PakSize])
+			rs = append(rs, r)
 		}
-	case SRA:
-		if len(data) != SRASize {
-			return nil, sizeErr(k, len(data), SRASize)
-		}
-	case FLA:
-		if len(data) != FLASize {
-			return nil, sizeErr(k, len(data), FLASize)
-		}
-	case MPK:
-		if len(data) == MPK4Size {
-			var rs []Region
-			for i := range Paks {
-				r, _ := RegionFor(MPK, i+1)
-				copy(img.Bytes(r), data[i*PakSize:(i+1)*PakSize])
-				rs = append(rs, r)
-			}
-			return rs, nil
-		}
-		if len(data) != PakSize {
-			return nil, sizeErr(k, len(data), PakSize, MPK4Size)
-		}
+		return rs, nil
 	}
 	r, err := RegionFor(k, slot)
 	if err != nil {
@@ -169,6 +154,31 @@ func (img *Image) Place(k Kind, slot int, data []byte) ([]Region, error) {
 		pad[i] = 0xFF
 	}
 	return []Region{r}, nil
+}
+
+// CheckNativeSize reports whether n bytes is a valid size for a native file of
+// kind k: 512 or 2048 for EEPROM, 32 KB for SRAM, 128 KB for FlashRAM, and
+// 32 KB (one pak) or 128 KB (four paks) for a Controller Pak.
+func CheckNativeSize(k Kind, n int) error {
+	switch k {
+	case EEP:
+		if n != EEP4KSize && n != EEP16KSize {
+			return sizeErr(k, n, EEP4KSize, EEP16KSize)
+		}
+	case SRA:
+		if n != SRASize {
+			return sizeErr(k, n, SRASize)
+		}
+	case FLA:
+		if n != FLASize {
+			return sizeErr(k, n, FLASize)
+		}
+	case MPK:
+		if n != PakSize && n != MPK4Size {
+			return sizeErr(k, n, PakSize, MPK4Size)
+		}
+	}
+	return nil
 }
 
 func sizeErr(k Kind, got int, want ...int) error {

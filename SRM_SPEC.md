@@ -174,6 +174,10 @@ Blank pak: either port `format_mempak()` to Go, or embed a 32 KB blank-pak templ
 taken from an unused slot of a real `.srm`. This tool embeds a template.
 
 ### Inspect
-Report the file size and validity, then for each region its offset, whether it is in
-use, the non-`0xFF` byte count, and the guessed EEPROM size. For each pak, list its
-used notes (game code, publisher, name).
+For an `.srm`, report the file size and validity, then for each region its offset,
+whether it is in use, the non-`0xFF` byte count, and the guessed EEPROM size. For each
+pak, list its used notes (game code, publisher, name).
+
+A native file (recognised by extension) gets the same row for its one save, without
+an offset. Its size is first checked against *Native sizes*. An `.eep` shows its real
+size (4 or 16 Kbit) instead of a guess, and a 128 KB `.mpk` shows one row per pak.

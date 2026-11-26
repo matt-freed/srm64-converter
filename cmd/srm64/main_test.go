@@ -371,9 +371,59 @@ func TestInsertConfirm(t *testing.T) {
 	}
 }
 
+func TestInspectNative(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, b []byte) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	pak := make([]byte, 0x8000) // empty note entries are zero, as on a formatted pak
+	copy(pak[0x300:], "NTST01")
+
+	cases := []struct {
+		name string
+		path string
+		want []string // substrings of the output
+	}{
+		{"eep 4K", filepath.Join(dir, "a.eep"), []string{"EEPROM file (512 bytes)", "EEPROM  512", "used", "4 Kbit"}},
+		{"eep 16K", filepath.Join(dir, "b.eep"), []string{"EEPROM file (2048 bytes)", "16 Kbit"}},
+		{"blank sra", write("c.sra", bytes.Repeat([]byte{0xFF}, 0x8000)), []string{"SRAM file (32768 bytes)", "blank", "  0  "}},
+		{"fla", filepath.Join(dir, "d.fla"), []string{"FlashRAM file (131072 bytes)", "used"}},
+		{"pak", write("e.mpk", pak), []string{"Controller Pak  32768", "1 note(s)", "Controller Pak notes:", "NTST"}},
+		{"4 paks", write("f.mpk", bytes.Repeat(pak, 4)), []string{"Controller Pak 4  32768", "Controller Pak 4 notes:"}},
+	}
+	randFile(t, filepath.Join(dir, "a.eep"), 30, 512)
+	randFile(t, filepath.Join(dir, "b.eep"), 31, 2048)
+	randFile(t, filepath.Join(dir, "d.fla"), 32, 0x20000)
+	for _, c := range cases {
+		out, err := run(t, "inspect", c.path)
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		for _, w := range c.want {
+			if !bytes.Contains([]byte(out), []byte(w)) {
+				t.Errorf("%s: output missing %q:\n%s", c.name, w, out)
+			}
+		}
+	}
+
+	// A wrong size is a runtime error, not a usage error.
+	_, err := run(t, "inspect", write("bad.eep", make([]byte, 1000)))
+	var ue usageError
+	if err == nil || errors.As(err, &ue) || !bytes.Contains([]byte(err.Error()), []byte("want 512 or 2048")) {
+		t.Errorf("bad size: err = %v", err)
+	}
+}
+
 func TestCLIErrors(t *testing.T) {
 	dir := t.TempDir()
 	eep := filepath.Join(dir, "input.eep") // split of g.srm writes g.eep beside it
+	junk := filepath.Join(dir, "junk.bin")
+	randFile(t, junk, 9, 100)
 	randFile(t, eep, 3, 512)
 	srmPath := filepath.Join(dir, "g.srm")
 	if _, err := run(t, "pack", "-o", srmPath, eep); err != nil {
@@ -390,7 +440,7 @@ func TestCLIErrors(t *testing.T) {
 		{"pack duplicate", []string{"pack", "-o", filepath.Join(dir, "x.srm"), eep, eep}, true},
 		{"pack unknown ext", []string{"pack", "-o", filepath.Join(dir, "x.srm"), srmPath}, true},
 		{"bad eep size", []string{"split", "--eep-size", "1k", srmPath}, true},
-		{"inspect not srm", []string{"inspect", eep}, false},
+		{"inspect not srm", []string{"inspect", junk}, false},
 		{"inspect no args", []string{"inspect"}, true},
 		{"pack --base removed", []string{"pack", "--base", srmPath, "-o", filepath.Join(dir, "x.srm"), eep}, true},
 		{"insert no natives", []string{"insert", srmPath}, true},
