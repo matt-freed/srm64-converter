@@ -42,6 +42,13 @@ gofmt -l .                      # must print nothing
     which it always does. `-f` only matters for `insert -o`.
   - `pack` always builds a new `.srm` from blank, and `insert` edits an existing one.
     Both share `placeFiles` in `pack.go`.
+  - `insert` asks before replacing any region that already holds data
+    (`confirmReplace` in `confirm.go`), and refuses when stdin isn't a terminal. `-f`
+    skips the prompt. `placeFiles` only changes the in-memory image and returns the
+    replaced regions, so nothing touches disk until after confirmation. Keep it that
+    way. Terminal detection uses `golang.org/x/term`. Don't go back to a
+    `ModeCharDevice` check, because `/dev/null` passes it. Tests stub
+    `stdinIsTerminal` (`runIn` in `main_test.go`).
   - Pak slot rules (`--slot`, then `.N.mpk`, then the first unused slot, then an
     error) are specified in `SRM_SPEC.md` under *Pak slot selection*.
     `srm.AssignPakSlots` implements them. `KindFromPath` returns slot 0 for "no slot

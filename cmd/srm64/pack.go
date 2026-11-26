@@ -21,7 +21,7 @@ slots. Otherwise each .mpk goes in the first slot that applies:
   3. the lowest-numbered slot with no notes that no other file claims
 
 If no slot is free, the command fails and asks for --slot. --slot or a
-GAME.N.mpk name replaces whatever that slot holds.`
+GAME.N.mpk name may pick a slot that already holds data.`
 
 func packCmd() *cobra.Command {
 	var (
@@ -30,7 +30,7 @@ func packCmd() *cobra.Command {
 		force bool
 	)
 	cmd := &cobra.Command{
-		Use:   "pack [-o OUT.srm] NATIVE...",
+		Use:   "pack [-o OUT.srm] [-f] NATIVE...",
 		Short: "Build a new .srm from native save files",
 		Long: `Build a new .srm from native save files.
 
@@ -47,7 +47,7 @@ GAME.2.mpk gives GAME.srm in the same directory.`,
 				out = srm.BaseName(a[0]) + ".srm"
 			}
 			img := srm.Blank()
-			if err := placeFiles(img, a, slot, cmd.OutOrStdout()); err != nil {
+			if _, err := placeFiles(img, a, slot, cmd.OutOrStdout()); err != nil {
 				return err
 			}
 			if err := writeFile(out, img[:], force); err != nil {
@@ -77,19 +77,21 @@ type native struct {
 
 // placeFiles reads each native file, resolves pak slots (see nativeHelp), and
 // places the files into img in argument order, printing one line per region
-// to out. slotFlag is the --slot value, or 0 if not given.
-func placeFiles(img *srm.Image, paths []string, slotFlag int, out io.Writer) error {
+// to out. slotFlag is the --slot value, or 0 if not given. It returns the
+// regions that held data before and were overwritten. img is only modified in
+// memory; on error the caller must not write it.
+func placeFiles(img *srm.Image, paths []string, slotFlag int, out io.Writer) ([]srm.Region, error) {
 	var files []native
 	var paks []int // indexes into files of single-slot .mpk files
 	nMPK := 0
 	for _, path := range paths {
 		k, slot, err := srm.KindFromPath(path)
 		if err != nil {
-			return usageError{err}
+			return nil, usageError{err}
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if k == srm.MPK {
 			nMPK++
@@ -103,11 +105,11 @@ func placeFiles(img *srm.Image, paths []string, slotFlag int, out io.Writer) err
 	if slotFlag != 0 {
 		switch {
 		case slotFlag < 1 || slotFlag > srm.Paks:
-			return usagef("--slot must be 1-%d, not %d", srm.Paks, slotFlag)
+			return nil, usagef("--slot must be 1-%d, not %d", srm.Paks, slotFlag)
 		case nMPK != 1:
-			return usagef("--slot needs exactly one .mpk file, got %d", nMPK)
+			return nil, usagef("--slot needs exactly one .mpk file, got %d", nMPK)
 		case len(paks) != 1:
-			return usagef("--slot can't be used with a 128 KB .mpk, which fills all four slots")
+			return nil, usagef("--slot can't be used with a 128 KB .mpk, which fills all four slots")
 		}
 		files[paks[0]].slot = slotFlag
 	}
@@ -118,16 +120,17 @@ func placeFiles(img *srm.Image, paths []string, slotFlag int, out io.Writer) err
 	}
 	slots, bad, err := srm.AssignPakSlots(img, requested)
 	if errors.Is(err, srm.ErrNoFreePak) {
-		return usagef("%s: every Controller Pak slot already holds data; "+
+		return nil, usagef("%s: every Controller Pak slot already holds data; "+
 			"use --slot N (1-%d) to choose one to replace", files[paks[bad]].path, srm.Paks)
 	} else if err != nil {
-		return usageError{err}
+		return nil, usageError{err}
 	}
 	for i, fi := range paks {
 		files[fi].slot = slots[i]
 	}
 
 	written := map[srm.Region]string{}
+	var replaced []srm.Region
 	for _, f := range files {
 		var had []bool
 		for _, r := range srm.Regions {
@@ -135,16 +138,17 @@ func placeFiles(img *srm.Image, paths []string, slotFlag int, out io.Writer) err
 		}
 		regions, err := img.Place(f.kind, f.slot, f.data)
 		if err != nil {
-			return fmt.Errorf("%s: %w", f.path, err)
+			return nil, fmt.Errorf("%s: %w", f.path, err)
 		}
 		for _, r := range regions {
 			if prev, ok := written[r]; ok {
-				return usagef("%s and %s both go in %s", prev, f.path, r.Label())
+				return nil, usagef("%s and %s both go in %s", prev, f.path, r.Label())
 			}
 			written[r] = f.path
 			note := ""
 			if had[regionIndex(r)] {
-				note = " (replaced existing data)"
+				note = " (replaces existing data)"
+				replaced = append(replaced, r)
 			}
 			fmt.Fprintf(out, "%s -> %s%s\n", f.path, r.Label(), note)
 		}
@@ -159,7 +163,7 @@ func placeFiles(img *srm.Image, paths []string, slotFlag int, out io.Writer) err
 	if carts > 1 {
 		fmt.Fprintln(os.Stderr, "srm64: warning: the .srm holds more than one cartridge save type; a game uses only one")
 	}
-	return nil
+	return replaced, nil
 }
 
 func regionIndex(r srm.Region) int {

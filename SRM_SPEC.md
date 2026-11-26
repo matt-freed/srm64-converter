@@ -158,7 +158,8 @@ A 32 KB `.mpk` goes in the first slot that applies, by these rules in order:
    *Detecting what is in use*) and that no other file in the same command claims.
 4. **No unused slot:** fail without writing anything, and ask the user to pass `--slot N`.
 
-Rules 1 and 2 replace whatever the slot holds. All files claiming a slot through
+Rules 1 and 2 may pick a slot that already holds data. Insert confirms before
+replacing data in any region (see the README). All files claiming a slot through
 rules 1 and 2 are resolved before any rule-3 file is placed, so a rule-3 file never
 takes a slot that a later file names. Rule-3 files fill slots in argument order. Two
 files that end up in the same slot are an error. A 128 KB `.mpk` always fills all

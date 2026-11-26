@@ -32,10 +32,10 @@ go vet ./... && go test ./...
 ## Usage
 
 ```sh
-srm64 inspect "Game.srm"                    # which regions hold data, pak notes
-srm64 split "Game.srm" [-o DIR] [-f]        # writes Game.eep / .sra / .fla / .mpk
-srm64 pack Game.eep [Game.mpk ...] [-o OUT.srm]  # writes Game.srm
-srm64 insert "Game.srm" Game.mpk [--slot N] [-o OUT.srm]  # add files to an existing .srm
+srm64 inspect "Game.srm"                                       # which regions hold data, pak notes
+srm64 split "Game.srm" [-o DIR] [-f]                           # writes Game.eep / .sra / .fla / .mpk
+srm64 pack Game.eep [Game.mpk ...] [-o OUT.srm] [-f]           # writes Game.srm
+srm64 insert "Game.srm" Game.mpk [--slot N] [-o OUT.srm] [-f]  # add files to an existing .srm
 ```
 
 - **Split** writes only the regions that hold data (`--all` writes every region). Pak 1
@@ -48,21 +48,25 @@ srm64 insert "Game.srm" Game.mpk [--slot N] [-o OUT.srm]  # add files to an exis
   Without `-o`, the output is named after the first file and written beside it:
   `Game.eep` or `Game.2.mpk` gives `Game.srm`.
 - **Insert** reads files the same way, but places them into an existing `.srm`. Only the
-  regions those files cover change, and each line of output notes whether it replaced
-  existing data. By default the `.srm` is updated in place; with `-o` the result is
-  written to a new file and the original is left alone.
+  regions those files cover change. By default the `.srm` is updated in place; with `-o`
+  the result is written to a new file and the original is left alone.
+- **Replacing data:** if any region `insert` would write, cart save or pak slot,
+  already holds data, it lists those regions and asks `Replace? [y/N]` before writing
+  anything. When stdin isn't a terminal (a script or pipe), it doesn't ask; it stops
+  with an error instead. `-f` replaces without asking.
 - **Pak slots** (`pack` and `insert`): each `.mpk` goes in the first slot that applies:
   1. `--slot N` (1–4), if given. This only works with a single `.mpk` file.
   2. N from a `GAME.N.mpk` file name.
   3. The lowest-numbered slot that has no notes and that no other file claims.
   4. If there is no such slot, the command fails without writing and asks for `--slot N`.
 
-  `--slot` and `GAME.N.mpk` replace whatever is in that slot. A 128 KB `.mpk` fills all
-  four slots. Because `split` writes pak 1 as `GAME.mpk`, inserting that file into an
-  `.srm` that already has a pak 1 puts it in the next free slot. To replace pak 1, use
-  `--slot 1`.
+  `--slot` and `GAME.N.mpk` can pick a slot that already holds data, which `insert`
+  confirms first, as above. A 128 KB `.mpk` fills all four slots. Because `split` writes
+  pak 1 as `GAME.mpk`, inserting that file into an `.srm` that already has a pak 1 puts
+  it in the next free slot. To replace pak 1, use `--slot 1`.
 - Commands never overwrite an existing file unless you pass `-f`. The exception is
-  `insert` updating its own input, which is the point of the command.
+  `insert` updating its own input `.srm`, which is the point of the command; replacing
+  data inside it is confirmed as described above.
 - Exit codes: 0 for success, 1 for an error, 2 for a bad command line.
 
 ## License

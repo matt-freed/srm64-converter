@@ -9,13 +9,30 @@ import (
 	"testing"
 )
 
+// Tests never have a terminal unless runIn asks for one, so prompts don't
+// depend on how go test was started.
+func init() { stdinIsTerminal = func() bool { return false } }
+
 func run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
-	var out bytes.Buffer
+	out, _, err := runIn(t, "", false, args...)
+	return out, err
+}
+
+// runIn runs the CLI with stdin set to input, as if from a terminal when tty
+// is true. It returns stdout and stderr.
+func runIn(t *testing.T, input string, tty bool, args ...string) (string, string, error) {
+	t.Helper()
+	old := stdinIsTerminal
+	stdinIsTerminal = func() bool { return tty }
+	defer func() { stdinIsTerminal = old }()
+	var out, errb bytes.Buffer
 	root := newRoot(&out)
+	root.SetErr(&errb)
+	root.SetIn(bytes.NewBufferString(input))
 	root.SetArgs(args)
 	err := root.Execute()
-	return out.String(), err
+	return out.String(), errb.String(), err
 }
 
 func randFile(t *testing.T, path string, seed uint64, n int) []byte {
@@ -145,14 +162,14 @@ func TestInsert(t *testing.T) {
 	}
 
 	// In place: pak 2 and EEPROM change, every other byte stays.
-	out, err := run(t, "insert", srmPath, filepath.Join(dir, "b.2.mpk"), filepath.Join(dir, "c.eep"))
+	out, err := run(t, "insert", "-f", srmPath, filepath.Join(dir, "b.2.mpk"), filepath.Join(dir, "c.eep"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains([]byte(out), []byte("EEPROM (replaced existing data)")) {
+	if !bytes.Contains([]byte(out), []byte("EEPROM (replaces existing data)")) {
 		t.Errorf("insert did not note the replaced EEPROM:\n%s", out)
 	}
-	if bytes.Contains([]byte(out), []byte("Controller Pak 2 (replaced")) {
+	if bytes.Contains([]byte(out), []byte("Controller Pak 2 (replaces")) {
 		t.Errorf("insert called a blank pak replaced:\n%s", out)
 	}
 	after, _ := os.ReadFile(srmPath)
@@ -222,14 +239,14 @@ func TestInsertPakSlots(t *testing.T) {
 
 	// --slot wins over the name, and may replace a used slot.
 	p3 := mkPak("fourth.4.mpk", 13)
-	out, err := run(t, "insert", "--slot", "1", srmPath, p3)
+	out, err := run(t, "insert", "-f", "--slot", "1", srmPath, p3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if s := slotOf(srmPath, p3); s != 1 {
 		t.Errorf("--slot 1 put pak in slot %d", s)
 	}
-	if !bytes.Contains([]byte(out), []byte("Controller Pak 1 (replaced existing data)")) {
+	if !bytes.Contains([]byte(out), []byte("Controller Pak 1 (replaces existing data)")) {
 		t.Errorf("--slot over a used slot not reported as replaced:\n%s", out)
 	}
 
@@ -257,6 +274,100 @@ func TestInsertPakSlots(t *testing.T) {
 		if _, err := run(t, a...); !errors.As(err, &ue) {
 			t.Errorf("%v: err = %v, want a usage error", a[1:3], err)
 		}
+	}
+}
+
+// TestInsertConfirm checks the prompt before replacing data: yes proceeds,
+// anything else aborts, no terminal refuses, and -f skips the question. A
+// fresh region never prompts.
+func TestInsertConfirm(t *testing.T) {
+	dir := t.TempDir()
+	eep1 := filepath.Join(dir, "one.eep")
+	randFile(t, eep1, 20, 512)
+	eep2 := filepath.Join(dir, "two.eep")
+	want := randFile(t, eep2, 21, 512)
+	pak := filepath.Join(dir, "p.mpk")
+	b := randFile(t, pak, 22, 0x8000)
+	copy(b[0x300:], "NTST01")
+	os.WriteFile(pak, b, 0o644)
+
+	srmPath := filepath.Join(dir, "g.srm")
+	reset := func() []byte {
+		t.Helper()
+		if _, err := run(t, "pack", "-f", "-o", srmPath, eep1, pak); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := os.ReadFile(srmPath)
+		return before
+	}
+	unchanged := func(name string, before []byte) {
+		t.Helper()
+		if now, _ := os.ReadFile(srmPath); !bytes.Equal(now, before) {
+			t.Errorf("%s: .srm was modified", name)
+		}
+	}
+	replaced := func(name string) {
+		t.Helper()
+		if now, _ := os.ReadFile(srmPath); !bytes.Equal(now[:512], want) {
+			t.Errorf("%s: EEPROM was not replaced", name)
+		}
+	}
+
+	for _, c := range []struct {
+		name, input string
+		tty, ok     bool
+	}{
+		{"yes", "y\n", true, true},
+		{"YES", "YES\n", true, true},
+		{"no", "n\n", true, false},
+		{"empty answer", "\n", true, false},
+		{"EOF", "", true, false},
+		{"no terminal", "y\n", false, false},
+	} {
+		before := reset()
+		_, stderr, err := runIn(t, c.input, c.tty, "insert", srmPath, eep2)
+		if !bytes.Contains([]byte(stderr), []byte("already hold data and will be replaced: EEPROM")) {
+			t.Errorf("%s: no warning naming EEPROM:\n%s", c.name, stderr)
+		}
+		if c.ok {
+			if err != nil {
+				t.Errorf("%s: %v", c.name, err)
+			}
+			replaced(c.name)
+		} else {
+			if err == nil {
+				t.Errorf("%s: insert went ahead", c.name)
+			}
+			unchanged(c.name, before)
+		}
+		if c.tty != bytes.Contains([]byte(stderr), []byte("Replace? [y/N]")) {
+			t.Errorf("%s: prompt shown = %v, want %v", c.name, !c.tty, c.tty)
+		}
+	}
+
+	// A pak slot counts too: --slot 1 over the used pak 1 asks.
+	before := reset()
+	_, stderr, err := runIn(t, "n\n", true, "insert", "--slot", "1", srmPath, pak)
+	if err == nil || !bytes.Contains([]byte(stderr), []byte("Controller Pak 1")) {
+		t.Errorf("pak replace: err = %v, stderr:\n%s", err, stderr)
+	}
+	unchanged("pak replace declined", before)
+
+	// -f never asks.
+	reset()
+	_, stderr, err = runIn(t, "", true, "insert", "-f", srmPath, eep2)
+	if err != nil || bytes.Contains([]byte(stderr), []byte("Replace?")) {
+		t.Errorf("-f: err = %v, stderr:\n%s", err, stderr)
+	}
+	replaced("-f")
+
+	// Nothing to replace: no warning, no prompt.
+	reset()
+	pak3 := filepath.Join(dir, "p.3.mpk")
+	os.WriteFile(pak3, b, 0o644)
+	_, stderr, err = runIn(t, "", true, "insert", srmPath, pak3)
+	if err != nil || bytes.Contains([]byte(stderr), []byte("warning")) {
+		t.Errorf("fresh slot: err = %v, stderr:\n%s", err, stderr)
 	}
 }
 
