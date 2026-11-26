@@ -9,9 +9,10 @@ import (
 
 func insertCmd() *cobra.Command {
 	var (
-		out   string
-		slot  int
-		force bool
+		out      string
+		slot     int
+		skipSwap bool
+		force    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "insert FILE.srm NATIVE... [--slot N] [-o OUT.srm] [-f]",
@@ -20,6 +21,8 @@ func insertCmd() *cobra.Command {
 cover and leaving every other region as it was.
 
 ` + nativeHelp + `
+
+` + byteOrderHelp + `
 
 If any region (cart save or pak slot) already holds data, insert lists
 them and asks before replacing them; without a terminal to ask, it stops.
@@ -33,7 +36,7 @@ to OUT.srm instead and FILE.srm is left untouched.`,
 			if err != nil {
 				return err
 			}
-			replaced, err := placeFiles(img, a[1:], slot, cmd.OutOrStdout())
+			replaced, err := placeFiles(img, a[1:], slot, byteOrder(skipSwap), cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
@@ -55,7 +58,8 @@ to OUT.srm instead and FILE.srm is left untouched.`,
 	}
 	f := cmd.Flags()
 	f.StringVarP(&out, "output", "o", "", "write to OUT.srm instead of updating FILE.srm")
-	addSlotFlag(f.IntVar, &slot)
+	addSlotFlag(f, &slot)
+	addByteOrderFlag(f, &skipSwap)
 	f.BoolVarP(&force, "force", "f", false, "replace existing data, and overwrite OUT.srm, without asking")
 	return cmd
 }

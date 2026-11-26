@@ -64,13 +64,41 @@ A valid `.srm` is exactly 296,960 bytes. Reject any other size.
 
 ## Byte order
 
-Each region is stored byte-for-byte, with no 16-bit or 32-bit swapping. This is the
-same byte order that cartridge dumpers produce, so a native file matches its SRM
-region exactly.
+EEPROM and Controller Paks are stored in natural byte order, the same order the
+cartridge chip or pak holds. Native `.eep` and `.mpk` files match their region exactly.
 
-(Not verified: some emulators, notably Project64, are known to store `.sra`/`.fla`
-with each 32-bit word swapped. Future work could add an optional byte swap flag later. It is
-not part of this format.)
+**SRAM and FlashRAM are stored with every 32-bit word byte-reversed.** The core keeps
+them as host-order `uint32` words, like RDRAM: `sram.c` and `flashram.c` address bytes
+as `addr ^ S8`, and `S8` is 3 on little-endian hosts. EEPROM is copied with `memcpy`,
+and paks are byte-addressed, so neither is affected. The result:
+
+| Bytes in the cart chip / dumper file | `M` `a` `r` `i` | `o` ` ` `S` `t` |
+|--------------------------------------|-----------------|-----------------|
+| Bytes in the `.srm` region           | `i` `r` `a` `M` | `t` `S` ` ` `o` |
+
+**Why the two groups differ:** this comes from how the emulator models the hardware,
+not from the cartridge. SRAM and FlashRAM sit on the cartridge bus, where the
+big-endian CPU accesses them in 32-bit words. Mupen64Plus keeps all bus memory,
+including RDRAM, as host-order 32-bit words so that each access is a single native load
+or store. EEPROM and Controller Paks are serial devices behind the PIF chip, read and
+written in small byte blocks that the core copies as plain byte arrays. The `.srm` is a
+raw dump of these buffers, so it inherits both layouts.
+
+Evidence:
+- Known save markers appear in an `.srm` only after the swap: Zelda: Ocarina of Time
+  (`ZELDAZ`) in SRAM, and Paper Mario (`Mario Story`, stored as `iraMtS o yro`) in
+  FlashRAM.
+- Text in SRAM/FlashRAM files in hardware order (e.g. New Tetris, Pokémon Snap) reads
+  normally, and the same text in the `.srm` is word-reversed.
+
+Converting between a native `.sra`/`.fla` in hardware order (cart dumpers and flashers)
+and the `.srm` therefore means reversing each 4-byte word. The operation is its own
+inverse. `.sra`/`.fla` files already in Mupen64Plus order (standalone Mupen64Plus, or
+tools that copy the region without swapping) are copied as stored.
+
+`S8` depends on the host. A `.srm` written on a big-endian machine would hold
+SRAM/FlashRAM in natural order. Every platform RetroArch commonly runs on is
+little-endian, so this spec assumes the swapped layout.
 
 ## Blank / initial contents
 
@@ -78,10 +106,10 @@ When no save exists, `format_saved_memory()` fills the regions as follows:
 
 - **EEPROM, SRAM, FlashRAM**: filled with `0xFF`.
 - **Controller Paks 1–4**: each is formatted by `format_mempak()` (ID blocks,
-  index/inode table, empty note table), so a blank pak is not all `0xFF`. Most of a
-  blank pak is `0xFF`, with about 376 non-zero formatting bytes. The source seeds a
-  random serial, but in practice unused slots are byte-identical, both within a
-  file and across files.
+  index/inode table, empty note table), so a blank pak is not all `0xFF`. A blank
+  pak is mostly `0x00`: 376 bytes are non-zero, and 60 of those are `0xFF`. The source
+  seeds a random serial, but in practice unused slots are byte-identical, both within
+  a file and across files.
 
 A game uses only one cartridge save type, so in practice exactly one cart region
 holds data and the others stay `0xFF`. Paks can hold data alongside any cart type.
@@ -128,8 +156,9 @@ and map it to slots 1–4.
 
 ### Split (SRM → native)
 1. Validate size == 296,960.
-2. For each cart region in use, write `<name>.eep|.sra|.fla` (EEPROM trimmed as
-   described above).
+2. For each cart region in use, write `<name>.eep|.sra|.fla`. EEPROM is trimmed as
+   described above, and SRAM/FlashRAM are word-swapped to hardware order unless
+   Mupen64Plus order is asked for (see *Byte order*).
 3. For each pak slot in use, write `<name>.mpk` for slot 1 and `<name>.<N>.mpk`
    for slots 2–4. Copy the full 32 KB slot.
 
@@ -139,6 +168,8 @@ and map it to slots 1–4.
    - `.eep` (512 or 2,048 B) goes to offset 0. Pad the rest of the 2 KB with `0xFF`.
    - `.sra` (32,768 B) goes to `0x20800`.
    - `.fla` (131,072 B) goes to `0x28800`.
+   - `.sra`/`.fla` in hardware order are word-swapped first; files in Mupen64Plus
+     order are copied as is (see *Byte order*).
    - `.mpk` (32,768 B) for pak N goes to `0x800 + (N-1)*0x8000`. A 131,072 B file
      goes to `0x800` and fills all four paks.
 3. Reject native files whose size does not match.

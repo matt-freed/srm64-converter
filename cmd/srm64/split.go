@@ -12,10 +12,11 @@ import (
 
 func splitCmd() *cobra.Command {
 	var (
-		outDir  string
-		eepSize string
-		all     bool
-		force   bool
+		outDir   string
+		eepSize  string
+		all      bool
+		skipSwap bool
+		force    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "split FILE.srm",
@@ -28,7 +29,9 @@ GAME.N.mpk for paks 2-4.
 
 The .srm does not record EEPROM size. By default a save whose data stops
 within the first 512 bytes is written as 4 Kbit (512 B), otherwise 16 Kbit
-(2048 B). Use --eep-size to override.`,
+(2048 B). Use --eep-size to override.
+
+` + byteOrderHelp,
 		Args: args(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, a []string) error {
 			var eepN int
@@ -57,7 +60,7 @@ within the first 512 bytes is written as 4 Kbit (512 B), otherwise 16 Kbit
 				if !all && !img.IsUsed(r) {
 					continue
 				}
-				data := img.Native(r, eepN)
+				data := img.Native(r, eepN, byteOrder(skipSwap))
 				path := filepath.Join(dir, srm.NativeName(base, r))
 				if err := writeFile(path, data, force); err != nil {
 					return err
@@ -75,6 +78,7 @@ within the first 512 bytes is written as 4 Kbit (512 B), otherwise 16 Kbit
 	f.StringVarP(&outDir, "output-dir", "o", "", "directory to write to (default: next to the .srm)")
 	f.StringVar(&eepSize, "eep-size", "auto", "EEPROM file size: auto, 512 or 2048")
 	f.BoolVar(&all, "all", false, "also write regions that hold no data")
+	addByteOrderFlag(f, &skipSwap)
 	f.BoolVarP(&force, "force", "f", false, "overwrite existing files")
 	return cmd
 }

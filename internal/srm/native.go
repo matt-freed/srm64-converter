@@ -16,9 +16,38 @@ const (
 	MPK4Size   = PakSize * Paks
 )
 
-// Native returns a copy of r's contents as a native save file. For EEPROM,
-// eepSize picks the file size (512 or 2048); 0 guesses with GuessEEPSize.
-func (img *Image) Native(r Region, eepSize int) []byte {
+// ByteOrder is the byte order of SRAM and FlashRAM native files. EEPROM and
+// Controller Pak files have a single order and are never swapped.
+type ByteOrder int
+
+const (
+	// Hardware is the order the cartridge chip holds, which cart dumpers
+	// read and write. It is the default.
+	Hardware ByteOrder = iota
+	// Mupen is the order stored in the .srm: every 32-bit word reversed,
+	// because the core keeps SRAM and FlashRAM as host-order (little-endian)
+	// words. Files in this order load only in Mupen64Plus-based emulators.
+	Mupen
+)
+
+// Swapped reports whether native files of kind k in order o differ from the
+// .srm bytes, which is true for SRAM and FlashRAM in Hardware order.
+func (o ByteOrder) Swapped(k Kind) bool {
+	return o == Hardware && (k == SRA || k == FLA)
+}
+
+// WordSwap reverses the bytes of each 32-bit word of b in place. len(b) must
+// be a multiple of 4. It is its own inverse.
+func WordSwap(b []byte) {
+	for i := 0; i+3 < len(b); i += 4 {
+		b[i], b[i+1], b[i+2], b[i+3] = b[i+3], b[i+2], b[i+1], b[i]
+	}
+}
+
+// Native returns a copy of r's contents as a native save file in byte order
+// o. For EEPROM, eepSize picks the file size (512 or 2048); 0 guesses with
+// GuessEEPSize.
+func (img *Image) Native(r Region, eepSize int, o ByteOrder) []byte {
 	b := img.Bytes(r)
 	if r.Kind == EEP {
 		if eepSize == 0 {
@@ -26,7 +55,11 @@ func (img *Image) Native(r Region, eepSize int) []byte {
 		}
 		b = b[:eepSize]
 	}
-	return bytes.Clone(b)
+	b = bytes.Clone(b)
+	if o.Swapped(r.Kind) {
+		WordSwap(b)
+	}
+	return b
 }
 
 // NativeName returns the file name split uses for r: base.eep, base.sra,
@@ -128,12 +161,17 @@ func KindFromPath(path string) (Kind, int, error) {
 	return 0, 0, fmt.Errorf("%s: unknown save type %q (want .eep, .sra, .fla or .mpk)", path, ext)
 }
 
-// Place copies native data into img. EEPROM data may be 512 or 2048 bytes;
-// the rest of the region is filled with 0xFF. A 128 KB .mpk fills all four
-// pak slots and slot is ignored. It returns the regions written.
-func (img *Image) Place(k Kind, slot int, data []byte) ([]Region, error) {
+// Place copies native data, in byte order o, into img. EEPROM data may be 512
+// or 2048 bytes; the rest of the region is filled with 0xFF. A 128 KB .mpk
+// fills all four pak slots and slot is ignored. data is not modified. It
+// returns the regions written.
+func (img *Image) Place(k Kind, slot int, data []byte, o ByteOrder) ([]Region, error) {
 	if err := CheckNativeSize(k, len(data)); err != nil {
 		return nil, err
+	}
+	if o.Swapped(k) {
+		data = bytes.Clone(data)
+		WordSwap(data)
 	}
 	if k == MPK && len(data) == MPK4Size {
 		var rs []Region

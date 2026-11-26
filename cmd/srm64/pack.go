@@ -8,6 +8,7 @@ import (
 
 	"github.com/matt-freed/srm64-converter/internal/srm"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // nativeHelp describes how native files are matched to regions; shared by
@@ -25,9 +26,10 @@ GAME.N.mpk name may pick a slot that already holds data.`
 
 func packCmd() *cobra.Command {
 	var (
-		out   string
-		slot  int
-		force bool
+		out      string
+		slot     int
+		skipSwap bool
+		force    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "pack [-o OUT.srm] [-f] NATIVE...",
@@ -35,6 +37,8 @@ func packCmd() *cobra.Command {
 		Long: `Build a new .srm from native save files.
 
 ` + nativeHelp + `
+
+` + byteOrderHelp + `
 
 Regions without a file are blank, as the emulator would create them. To
 add files to an existing .srm, use insert.
@@ -47,7 +51,7 @@ GAME.2.mpk gives GAME.srm in the same directory.`,
 				out = srm.BaseName(a[0]) + ".srm"
 			}
 			img := srm.Blank()
-			if _, err := placeFiles(img, a, slot, cmd.OutOrStdout()); err != nil {
+			if _, err := placeFiles(img, a, slot, byteOrder(skipSwap), cmd.OutOrStdout()); err != nil {
 				return err
 			}
 			if err := writeFile(out, img[:], force); err != nil {
@@ -59,13 +63,34 @@ GAME.2.mpk gives GAME.srm in the same directory.`,
 	}
 	f := cmd.Flags()
 	f.StringVarP(&out, "output", "o", "", "the .srm file to write (default: first file's name with .srm)")
-	addSlotFlag(f.IntVar, &slot)
+	addSlotFlag(f, &slot)
+	addByteOrderFlag(f, &skipSwap)
 	f.BoolVarP(&force, "force", "f", false, "overwrite OUT.srm if it exists")
 	return cmd
 }
 
-func addSlotFlag(intVar func(*int, string, int, string), p *int) {
-	intVar(p, "slot", 0, "Controller Pak slot (1-4) for a single .mpk file")
+func addSlotFlag(f *pflag.FlagSet, p *int) {
+	f.IntVar(p, "slot", 0, "Controller Pak slot (1-4) for a single .mpk file")
+}
+
+// byteOrderHelp explains the SRAM/FlashRAM byte order; shared by split, pack
+// and insert.
+const byteOrderHelp = `.sra and .fla files are read and written in cartridge (hardware) order, the
+order cart dumpers use. The .srm stores them with every 4-byte word
+reversed, so they are swapped on the way in and out. --skip-byte-swap
+copies them as stored, for .sra/.fla files already in Mupen64Plus order
+(e.g. from standalone Mupen64Plus or a tool that doesn't swap). .eep and
+.mpk files are never swapped.`
+
+func addByteOrderFlag(f *pflag.FlagSet, p *bool) {
+	f.BoolVar(p, "skip-byte-swap", false, "copy .sra/.fla data as stored in the .srm (Mupen64Plus order)")
+}
+
+func byteOrder(skipSwap bool) srm.ByteOrder {
+	if skipSwap {
+		return srm.Mupen
+	}
+	return srm.Hardware
 }
 
 type native struct {
@@ -77,10 +102,11 @@ type native struct {
 
 // placeFiles reads each native file, resolves pak slots (see nativeHelp), and
 // places the files into img in argument order, printing one line per region
-// to out. slotFlag is the --slot value, or 0 if not given. It returns the
+// to out. slotFlag is the --slot value, or 0 if not given, and order is the
+// byte order of .sra/.fla files. It returns the
 // regions that held data before and were overwritten. img is only modified in
 // memory; on error the caller must not write it.
-func placeFiles(img *srm.Image, paths []string, slotFlag int, out io.Writer) ([]srm.Region, error) {
+func placeFiles(img *srm.Image, paths []string, slotFlag int, order srm.ByteOrder, out io.Writer) ([]srm.Region, error) {
 	var files []native
 	var paks []int // indexes into files of single-slot .mpk files
 	nMPK := 0
@@ -136,7 +162,7 @@ func placeFiles(img *srm.Image, paths []string, slotFlag int, out io.Writer) ([]
 		for _, r := range srm.Regions {
 			had = append(had, img.IsUsed(r))
 		}
-		regions, err := img.Place(f.kind, f.slot, f.data)
+		regions, err := img.Place(f.kind, f.slot, f.data, order)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", f.path, err)
 		}

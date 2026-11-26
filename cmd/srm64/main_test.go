@@ -419,6 +419,82 @@ func TestInspectNative(t *testing.T) {
 	}
 }
 
+// TestCLIByteSwap checks the bytes on disk: .sra/.fla are word-swapped into
+// and out of the .srm by default, and copied as stored with --skip-byte-swap,
+// for pack, insert and split. .eep is never swapped.
+func TestCLIByteSwap(t *testing.T) {
+	dir := t.TempDir()
+	sra := filepath.Join(dir, "g.sra")
+	data := randFile(t, sra, 40, 0x8000)
+	swapped := bytes.Clone(data)
+	for i := 0; i < len(swapped); i += 4 {
+		swapped[i], swapped[i+1], swapped[i+2], swapped[i+3] = swapped[i+3], swapped[i+2], swapped[i+1], swapped[i]
+	}
+	eep := filepath.Join(dir, "g.eep")
+	eepData := randFile(t, eep, 41, 512)
+	const sraOff = 0x20800
+	region := func(p string) []byte {
+		t.Helper()
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b[sraOff : sraOff+0x8000]
+	}
+
+	hw, mu := filepath.Join(dir, "hw.srm"), filepath.Join(dir, "mu.srm")
+	if _, err := run(t, "pack", "-o", hw, sra, eep); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "pack", "--skip-byte-swap", "-o", mu, sra); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(region(hw), swapped) {
+		t.Error("pack did not word-swap the .sra")
+	}
+	if !bytes.Equal(region(mu), data) {
+		t.Error("pack --skip-byte-swap changed the .sra")
+	}
+	if b, _ := os.ReadFile(hw); !bytes.Equal(b[:512], eepData) {
+		t.Error("pack swapped the .eep")
+	}
+
+	// insert follows the same rule.
+	in := filepath.Join(dir, "in.srm")
+	if _, err := run(t, "pack", "-o", in, eep); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "insert", in, sra); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(region(in), swapped) {
+		t.Error("insert did not word-swap the .sra")
+	}
+
+	// split reverses it, so the default round trip gives back the input.
+	for _, c := range []struct {
+		name string
+		args []string
+		want []byte
+	}{
+		{"default", nil, data},
+		{"skip", []string{"--skip-byte-swap"}, swapped},
+	} {
+		out := filepath.Join(dir, "split-"+c.name)
+		os.Mkdir(out, 0o755)
+		if _, err := run(t, append(append([]string{"split", "-o", out}, c.args...), hw)...); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := os.ReadFile(filepath.Join(out, "hw.sra"))
+		if !bytes.Equal(got, c.want) {
+			t.Errorf("split %s: wrong .sra bytes", c.name)
+		}
+		if e, _ := os.ReadFile(filepath.Join(out, "hw.eep")); !bytes.Equal(e, eepData) {
+			t.Errorf("split %s: .eep changed", c.name)
+		}
+	}
+}
+
 func TestCLIErrors(t *testing.T) {
 	dir := t.TempDir()
 	eep := filepath.Join(dir, "input.eep") // split of g.srm writes g.eep beside it

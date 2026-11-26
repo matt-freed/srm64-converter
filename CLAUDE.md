@@ -27,9 +27,15 @@ gofmt -l .                      # must print nothing
   was copied from an unused slot of a real `.srm`. Don't regenerate or edit that
   file. Every unused slot Mupen64Plus-Next writes is identical to it, including the
   serial.
-- **No byte-swapping.** Regions are stored exactly as the native files. Other
-  emulators' word-swapped `.sra`/`.fla` (e.g. Project64) aren't supported. Adding a
-  swap would be a new, opt-in flag.
+- **SRAM and FlashRAM are word-swapped by default; EEPROM and paks never are.** The
+  core stores `.sra`/`.fla` data with each 32-bit word reversed (see *Byte order* in
+  `SRM_SPEC.md`). `split`, `pack` and `insert` convert to and from hardware order, the
+  order cart dumpers use. `--skip-byte-swap` copies the data as stored (`srm.Mupen`).
+  The swap lives only in `Image.Native` / `Image.Place` (`ByteOrder.Swapped`). Don't
+  add it anywhere else, or data gets swapped twice.
+  - Don't verify byte order by comparing against files extracted by another
+    converter, since it's order may not be known. Check for readable save text or a known
+    marker instead (`ZELDAZ`, `Mario Story`).
 - **Mempak support is deliberately minimal:** note-table parsing only (game code,
   publisher, raw name bytes), with no font decoding or filesystem logic. 
 - **CLI conventions**:

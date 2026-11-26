@@ -85,7 +85,7 @@ func split(img *Image) map[string][]byte {
 	files := map[string][]byte{}
 	for _, r := range Regions {
 		if img.IsUsed(r) {
-			files[NativeName("game", r)] = img.Native(r, 0)
+			files[NativeName("game", r)] = img.Native(r, 0, Hardware)
 		}
 	}
 	return files
@@ -119,7 +119,7 @@ func pack(t *testing.T, files map[string][]byte) *Image {
 		slots[i] = assigned[j]
 	}
 	for i, name := range names {
-		if _, err := img.Place(kinds[i], slots[i], files[name]); err != nil {
+		if _, err := img.Place(kinds[i], slots[i], files[name], Hardware); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
@@ -182,7 +182,7 @@ func TestPlaceIntoBase(t *testing.T) {
 	base := pack(t, map[string][]byte{"game.eep": randBytes(20, EEP4KSize)})
 	pak := pakWithNotes(21, 2)
 	img := *base
-	if _, err := img.Place(MPK, 2, pak); err != nil {
+	if _, err := img.Place(MPK, 2, pak, Hardware); err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range Regions {
@@ -200,10 +200,10 @@ func TestEEPSizeGuess(t *testing.T) {
 	copy(eep, randBytes(30, EEP4KSize))
 	img := pack(t, map[string][]byte{"game.eep": eep})
 	r := Regions[0]
-	if n := len(img.Native(r, 0)); n != EEP4KSize {
+	if n := len(img.Native(r, 0, Hardware)); n != EEP4KSize {
 		t.Errorf("auto size = %d, want %d", n, EEP4KSize)
 	}
-	if !bytes.Equal(img.Native(r, EEP16KSize), eep) {
+	if !bytes.Equal(img.Native(r, EEP16KSize, Hardware), eep) {
 		t.Error("explicit 2048 did not return the full EEPROM")
 	}
 	eep[0x200] = 0x00
@@ -215,7 +215,7 @@ func TestEEPSizeGuess(t *testing.T) {
 func TestNativeIsCopy(t *testing.T) {
 	img := pack(t, map[string][]byte{"game.sra": randBytes(40, SRASize)})
 	r, _ := RegionFor(SRA, 0)
-	b := img.Native(r, 0)
+	b := img.Native(r, 0, Hardware)
 	b[0] ^= 0xFF
 	if img.Bytes(r)[0] == b[0] {
 		t.Error("Native aliases the image")
@@ -255,7 +255,7 @@ func TestPlaceSizes(t *testing.T) {
 		{MPK, PakSize, true}, {MPK, MPK4Size, true}, {MPK, 36928, false},
 	}
 	for _, c := range cases {
-		_, err := Blank().Place(c.k, 1, make([]byte, c.n))
+		_, err := Blank().Place(c.k, 1, make([]byte, c.n), Hardware)
 		if (err == nil) != c.okay {
 			t.Errorf("Place(%s, %d bytes): err = %v, want ok=%v", c.k.Name(), c.n, err, c.okay)
 		}
@@ -264,7 +264,7 @@ func TestPlaceSizes(t *testing.T) {
 
 func TestPlaceEEPPads(t *testing.T) {
 	img := new(Image) // all zero, so padding is visible
-	if _, err := img.Place(EEP, 0, make([]byte, 512)); err != nil {
+	if _, err := img.Place(EEP, 0, make([]byte, 512), Hardware); err != nil {
 		t.Fatal(err)
 	}
 	eep := img.Bytes(Regions[0])
@@ -279,7 +279,7 @@ func TestPlaceMPK4(t *testing.T) {
 		data[i*PakSize] = byte(i + 1)
 	}
 	img := Blank()
-	rs, err := img.Place(MPK, 1, data)
+	rs, err := img.Place(MPK, 1, data, Hardware)
 	if err != nil || len(rs) != Paks {
 		t.Fatalf("Place 128 KB mpk: %v, %d regions", err, len(rs))
 	}
@@ -408,5 +408,87 @@ func TestAssignPakSlots(t *testing.T) {
 	}
 	if _, _, err := AssignPakSlots(Blank(), []int{5}); err == nil || errors.Is(err, ErrNoFreePak) {
 		t.Errorf("slot 5: err = %v, want a range error", err)
+	}
+}
+
+func TestWordSwap(t *testing.T) {
+	b := []byte("ABCDEFGH")
+	WordSwap(b)
+	if string(b) != "DCBAHGFE" {
+		t.Errorf("WordSwap = %q, want DCBAHGFE", b)
+	}
+	WordSwap(b)
+	if string(b) != "ABCDEFGH" {
+		t.Errorf("WordSwap twice = %q, want the original", b)
+	}
+}
+
+// TestByteOrder checks that SRAM and FlashRAM are word-swapped between
+// hardware order and the .srm, that Mupen order copies them as stored, and
+// that EEPROM and paks are never swapped.
+func TestByteOrder(t *testing.T) {
+	for _, c := range []struct {
+		k       Kind
+		n       int
+		swapped bool // in Hardware order
+	}{
+		{SRA, SRASize, true},
+		{FLA, FLASize, true},
+		{EEP, EEP16KSize, false},
+		{MPK, PakSize, false},
+	} {
+		r, _ := RegionFor(c.k, 1)
+		data := randBytes(uint64(c.k)+60, c.n)
+		orig := bytes.Clone(data)
+		swapped := bytes.Clone(data)
+		WordSwap(swapped)
+
+		hw := Blank()
+		if _, err := hw.Place(c.k, 1, data, Hardware); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(data, orig) {
+			t.Errorf("%s: Place modified its input", c.k.Name())
+		}
+		want := orig
+		if c.swapped {
+			want = swapped
+		}
+		if !bytes.Equal(hw.Bytes(r), want) {
+			t.Errorf("%s: Hardware order stored wrong bytes (swapped=%v expected)", c.k.Name(), c.swapped)
+		}
+		if !bytes.Equal(hw.Native(r, EEP16KSize, Hardware), orig) {
+			t.Errorf("%s: Hardware round trip changed the data", c.k.Name())
+		}
+
+		mu := Blank()
+		if _, err := mu.Place(c.k, 1, data, Mupen); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(mu.Bytes(r), orig) {
+			t.Errorf("%s: Mupen order did not copy as stored", c.k.Name())
+		}
+		if !bytes.Equal(mu.Native(r, EEP16KSize, Mupen), orig) {
+			t.Errorf("%s: Mupen round trip changed the data", c.k.Name())
+		}
+		if c.swapped && !bytes.Equal(mu.Native(r, 0, Hardware), swapped) {
+			t.Errorf("%s: Hardware split of Mupen-placed data is not swapped", c.k.Name())
+		}
+	}
+}
+
+// TestByteOrderMarker uses a realistic case: a save written by a game holds
+// readable text in hardware order (Paper Mario's FlashRAM starts with
+// "Mario Story"), and in the .srm it appears word-swapped.
+func TestByteOrderMarker(t *testing.T) {
+	fla := bytes.Repeat([]byte{0xFF}, FLASize)
+	copy(fla, "Mario Story 006\x00")
+	img := Blank()
+	if _, err := img.Place(FLA, 0, fla, Hardware); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := RegionFor(FLA, 0)
+	if got := string(img.Bytes(r)[:12]); got != "iraMtS o yro" {
+		t.Errorf(".srm FlashRAM starts %q, want %q", got, "iraMtS o yro")
 	}
 }

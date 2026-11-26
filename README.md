@@ -72,9 +72,9 @@ go vet ./... && go test ./...
 ```sh
 srm64 inspect "Game.srm"                                       # which regions hold data, pak notes
 srm64 inspect Game.eep                                         # size, status and notes of a native file
-srm64 split "Game.srm" [-o DIR] [-f]                           # writes Game.eep / .sra / .fla / .mpk
-srm64 pack Game.eep [Game.mpk ...] [-o OUT.srm] [-f]           # writes Game.srm
-srm64 insert "Game.srm" Game.mpk [--slot N] [-o OUT.srm] [-f]  # add files to an existing .srm
+srm64 split "Game.srm" [-o DIR] [--skip-byte-swap] [-f]              # writes Game.eep / .sra / .fla / .mpk
+srm64 pack Game.sra [Game.mpk ...] [-o OUT.srm] [--skip-byte-swap] [-f]  # writes Game.srm
+srm64 insert "Game.srm" Game.mpk [--slot N] [-o OUT.srm] [--skip-byte-swap] [-f]  # add files to an existing .srm
 ```
 
 - **Split** writes only the regions that hold data (`--all` writes every region). Pak 1
@@ -93,6 +93,13 @@ srm64 insert "Game.srm" Game.mpk [--slot N] [-o OUT.srm] [-f]  # add files to an
   already holds data, it lists those regions and asks `Replace? [y/N]` before writing
   anything. When stdin isn't a terminal (a script or pipe), it doesn't ask; it stops
   with an error instead. `-f` replaces without asking.
+- **Byte order (`.sra` / `.fla`):** Mupen64Plus-Next stores SRAM and FlashRAM with every
+  4-byte word reversed. `split`, `pack` and `insert` swap them, so `.sra` and `.fla` files
+  are in the cartridge's own order, which is what cart dumpers and flashers read and
+  write. Pass `--skip-byte-swap` for files that are already in Mupen64Plus order, e.g.
+  from standalone Mupen64Plus or a converter that copies the data without swapping.
+  `.eep` and `.mpk` files are never swapped. To check a file's order, look for readable
+  text from the game: in the cartridge's order it reads normally.
 - **Pak slots** (`pack` and `insert`): each `.mpk` goes in the first slot that applies:
   1. `--slot N` (1–4), if given. This only works with a single `.mpk` file.
   2. N from a `GAME.N.mpk` file name.
