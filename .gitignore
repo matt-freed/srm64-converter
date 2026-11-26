@@ -1,2 +1,5 @@
 /srm64
+/srm64.exe
+build/
 .DS_Store
+samples/

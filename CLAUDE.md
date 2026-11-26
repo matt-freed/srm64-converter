@@ -70,3 +70,18 @@ The `.srm` doesn't record EEPROM size. `split` guesses 512 B when bytes
 `0x200`–`0x7FF` are all `0xFF`, which is wrong for a 16 Kbit game that hasn't
 written past byte 512. `--eep-size` overrides the guess. Keep the guess, the
 override, and the spec's description consistent.
+
+## CI and releases
+
+`.github/workflows/build.yml` is modelled on `mempak-tools`:
+- **Pull requests and pushes to `main`:** vet, test and a CLI smoke test on Linux, macOS
+  and Windows (`gofmt` is checked on Linux), then packaging.
+- **Pushes to `main` only:** publishes a GitHub release tagged `v<major>.<minor>.<run number>`.
+  `VERSION` holds `major.minor`. The version is stamped in with `-X main.version`, so a
+  local build reports `dev`.
+
+Package names (`srm64-macos-universal.tar.gz`, `srm64-linux-x86_64.tar.gz`,
+`srm64-linux-arm64.tar.gz`, `srm64-windows-x86_64.zip`) and the `srm64-<platform>/srm64`
+layout inside each tarball are what `install.sh` downloads and unpacks, so change them
+together. Release builds use `CGO_ENABLED=0`, so keep the code cgo-free. Test
+`install.sh` locally with `SRM64_URL=file:///path/to/pkg.tar.gz PREFIX=/tmp/x sh install.sh`.

@@ -13,6 +13,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// version is set at build time with -ldflags "-X main.version=...".
+var version = "dev"
+
 // stdout is buffered so small writes don't each hit the pipe; flushed on exit.
 var stdout = bufio.NewWriter(os.Stdout)
 
@@ -37,12 +40,21 @@ func newRoot(out io.Writer) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "srm64",
 		Short:         "Convert Mupen64Plus-Next .srm saves to and from native N64 save files",
+		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	root.SetVersionTemplate("srm64 {{.Version}}\n")
 	root.SetOut(out)
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
-	root.AddCommand(inspectCmd(), splitCmd(), packCmd(), insertCmd())
+	root.AddCommand(inspectCmd(), splitCmd(), packCmd(), insertCmd(), &cobra.Command{
+		Use:   "version",
+		Short: "Show the version",
+		Args:  args(cobra.NoArgs),
+		Run: func(cmd *cobra.Command, _ []string) {
+			fmt.Fprintf(cmd.OutOrStdout(), "srm64 %s\n", version)
+		},
+	})
 	return root
 }
 
