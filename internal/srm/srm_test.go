@@ -79,6 +79,24 @@ func TestBlank(t *testing.T) {
 	}
 }
 
+func TestZeroFilledCartIsBlank(t *testing.T) {
+	img := Blank()
+	for _, r := range Regions {
+		if r.Kind == MPK {
+			continue
+		}
+		b := img.Bytes(r)
+		clear(b)
+		if img.IsUsed(r) {
+			t.Errorf("%s filled with 0x00 is used", r.Label())
+		}
+		b[len(b)-1] = 0x01
+		if !img.IsUsed(r) {
+			t.Errorf("%s with one non-zero byte is not used", r.Label())
+		}
+	}
+}
+
 // split extracts every used region the way the split command does, keyed by
 // the file name it would write.
 func split(img *Image) map[string][]byte {

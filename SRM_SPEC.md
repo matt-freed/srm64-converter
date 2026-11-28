@@ -122,7 +122,7 @@ holds data and the others stay `0xFF`. Paks can hold data alongside any cart typ
 
 ## Detecting what is in use
 
-- **EEPROM / SRAM / FlashRAM**: the region is in use if any byte is not `0xFF`.
+- **EEPROM / SRAM / FlashRAM**: the region is in use unless every byte is `0xFF` or every byte is `0x00`. 
 - **Controller Pak N**: read the note table at pak offset `0x300`–`0x4FF`
   (16 entries × 32 bytes). An entry is used if its 4-byte game code (bytes 0–3)
   is non-zero. A pak with no used entries is blank or formatted.
