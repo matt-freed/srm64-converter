@@ -492,3 +492,49 @@ func TestByteOrderMarker(t *testing.T) {
 		t.Errorf(".srm FlashRAM starts %q, want %q", got, "iraMtS o yro")
 	}
 }
+
+func TestFirstTextLine(t *testing.T) {
+	ff := func(n int) []byte { return bytes.Repeat([]byte{0xFF}, n) }
+	at := func(b []byte, off int, s string) []byte { copy(b[off:], s); return b }
+
+	cases := []struct {
+		name string
+		b    []byte
+		off  int
+		line string
+		ok   bool
+	}{
+		{"title at start", at(ff(64), 0, "Mario Story 006\x00"), 0, "Mario Story 006.", true},
+		{"later line", at(make([]byte, 0x1000), 0xF0C, "MART"), 0xF00, "............MART", true},
+		{"blank 0xFF", ff(64), 0, "", false},
+		{"blank zero", make([]byte, 64), 0, "", false},
+		{"run too short", at(ff(32), 3, "ABC"), 0, "", false},
+		{"too few letters", at(ff(32), 0, "12345678"), 0, "", false},
+		{"split by a non-printable", at(ff(32), 0, "AB\x01CD"), 0, "", false},
+	}
+	for _, c := range cases {
+		off, line, ok := FirstTextLine(c.b)
+		if ok != c.ok || (ok && (off != c.off || line != c.line)) {
+			t.Errorf("%s: got %#x %q %v, want %#x %q %v", c.name, off, line, ok, c.off, c.line, c.ok)
+		}
+	}
+}
+
+// TestFirstTextLineBothOrders checks that the same line is found whether the
+// data is in cartridge order or word-swapped (Mupen64Plus order), and that the
+// swapped text shows up scrambled.
+func TestFirstTextLineBothOrders(t *testing.T) {
+	hw := bytes.Repeat([]byte{0xFF}, 0x100)
+	copy(hw[0x40:], "Mario Story 006\x00")
+	mupen := bytes.Clone(hw)
+	WordSwap(mupen)
+
+	off1, line1, ok1 := FirstTextLine(hw)
+	off2, line2, ok2 := FirstTextLine(mupen)
+	if !ok1 || !ok2 || off1 != 0x40 || off2 != 0x40 {
+		t.Fatalf("offsets %#x/%v and %#x/%v, want 0x40 for both", off1, ok1, off2, ok2)
+	}
+	if line1 != "Mario Story 006." || line2 != "iraMtS o yro.600" {
+		t.Errorf("lines %q and %q", line1, line2)
+	}
+}

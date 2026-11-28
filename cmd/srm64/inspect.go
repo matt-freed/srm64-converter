@@ -103,7 +103,26 @@ func inspectNative(out io.Writer, path string, k srm.Kind) error {
 			printNotes(out, p.label, p.b)
 		}
 	}
+	if k != srm.MPK {
+		printTextLine(out, k, b)
+	}
 	return nil
+}
+
+// printTextLine shows the first line of readable text in a cart save (see
+// srm.FirstTextLine). For .sra/.fla it lets the byte order be checked by eye;
+// .eep has only one order, so it gets no hint.
+func printTextLine(out io.Writer, k srm.Kind, b []byte) {
+	swappable := k == srm.SRA || k == srm.FLA
+	off, line, ok := srm.FirstTextLine(b)
+	if !ok {
+		fmt.Fprintln(out, "\nFirst found text: none")
+		return
+	}
+	fmt.Fprintf(out, "\nFirst found text at 0x%05X: %s\n", off, line)
+	if swappable {
+		fmt.Fprintln(out, "  (can be used to manually verify correct byte order, if text looks scrambled try byte swapping)")
+	}
 }
 
 // describe returns the STATUS and NOTES columns for save data b of kind k.

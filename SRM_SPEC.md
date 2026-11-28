@@ -212,3 +212,13 @@ pak, list its used notes (game code, publisher, name).
 A native file (recognised by extension) gets the same row for its one save, without
 an offset. Its size is first checked against *Native sizes*. An `.eep` shows its real
 size (4 or 16 Kbit) instead of a guess, and a 128 KB `.mpk` shows one row per pak.
+
+An `.sra`, `.fla` or `.eep` also shows its first line of readable text, as stored. For
+`.sra`/`.fla` this lets the byte order be checked by eye. `.eep` has only one order, so
+it gets the line without the byte-order hint. A line is a 16-byte-aligned row, as in a hex dump, that
+contains a run of at least 4 printable ASCII characters with at least 3 letters.
+Because rows are 16-byte aligned, the word swap only moves bytes within a row, so the
+same row is found in either order. Text reads normally in cartridge order and is
+reversed in 4-byte groups in Mupen64Plus order. There is no standard save header. Some saves have no text, and
+binary data can match by chance, so this is a visual aid, not a check the tool relies
+on.

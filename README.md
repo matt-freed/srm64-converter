@@ -98,8 +98,10 @@ srm64 insert "Game.srm" Game.mpk [--slot N] [-o OUT.srm] [--skip-byte-swap] [-f]
   are in the cartridge's own order, which is what cart dumpers and flashers read and
   write. Pass `--skip-byte-swap` for files that are already in Mupen64Plus order, e.g.
   from standalone Mupen64Plus or a converter that copies the data without swapping.
-  `.eep` and `.mpk` files are never swapped. To check a file's order, look for readable
-  text from the game: in the cartridge's order it reads normally.
+  `.eep` and `.mpk` files are never swapped. To check a file's order, run
+  `srm64 inspect` on it. It shows the first line of readable text:
+  `Mario Story 006.` is cartridge order, and `iraMtS o yro.600` is Mupen64Plus order.
+  Not every game stores text, so this doesn't work for every save.
 - **Pak slots** (`pack` and `insert`): each `.mpk` goes in the first slot that applies:
   1. `--slot N` (1–4), if given. This only works with a single `.mpk` file.
   2. N from a `GAME.N.mpk` file name.

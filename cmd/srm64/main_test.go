@@ -495,6 +495,45 @@ func TestCLIByteSwap(t *testing.T) {
 	}
 }
 
+// TestInspectText checks the readable-text line: shown for .sra/.fla/.eep in the
+// file's own order, with the byte-order hint only for .sra/.fla, and never for .mpk.
+func TestInspectText(t *testing.T) {
+	dir := t.TempDir()
+	fla := bytes.Repeat([]byte{0xFF}, 0x20000)
+	copy(fla, "Mario Story 006\x00")
+	flaPath := filepath.Join(dir, "g.fla")
+	os.WriteFile(flaPath, fla, 0o644)
+	sraPath := filepath.Join(dir, "blank.sra")
+	os.WriteFile(sraPath, bytes.Repeat([]byte{0xFF}, 0x8000), 0o644)
+	eepPath := filepath.Join(dir, "g.eep")
+	os.WriteFile(eepPath, append([]byte("ABCDEFGH"), bytes.Repeat([]byte{0xFF}, 504)...), 0o644)
+
+	pak := make([]byte, 0x8000)
+	copy(pak, "ABCDEFGH")
+	pakPath := filepath.Join(dir, "g.mpk")
+	os.WriteFile(pakPath, pak, 0o644)
+
+	for _, c := range []struct {
+		path, want string
+		absent     bool
+	}{
+		{flaPath, "First found text at 0x00000: Mario Story 006.", false},
+		{flaPath, "try byte swapping", false},
+		{sraPath, "First found text: none", false},
+		{eepPath, "First found text at 0x00000: ABCDEFGH", false},
+		{eepPath, "try byte swapping", true},
+		{pakPath, "First found text", true},
+	} {
+		out, err := run(t, "inspect", c.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := bytes.Contains([]byte(out), []byte(c.want)); got == c.absent {
+			t.Errorf("%s: contains %q = %v, want %v:\n%s", filepath.Base(c.path), c.want, got, !c.absent, out)
+		}
+	}
+}
+
 func TestCLIErrors(t *testing.T) {
 	dir := t.TempDir()
 	eep := filepath.Join(dir, "input.eep") // split of g.srm writes g.eep beside it
