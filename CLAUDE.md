@@ -31,8 +31,11 @@ gofmt -l .                      # must print nothing
   core stores `.sra`/`.fla` data with each 32-bit word reversed (see *Byte order* in
   `SRM_SPEC.md`). `split`, `pack` and `insert` convert to and from hardware order, the
   order cart dumpers use. `--skip-byte-swap` copies the data as stored (`srm.Mupen`).
-  The swap lives only in `Image.Native` / `Image.Place` (`ByteOrder.Swapped`). Don't
-  add it anywhere else, or data gets swapped twice.
+  In conversions, the swap lives only in `Image.Native` / `Image.Place`
+  (`ByteOrder.Swapped`). Don't add it anywhere else in split/pack/insert, or data gets
+  swapped twice. The `swap` command is the one deliberate exception: a manual
+  native-to-native transform (`srm.Swap` with `SwapFull`/`SwapBytes`/`SwapWords`)
+  that never touches an `.srm`.
   - Don't verify byte order by comparing against files extracted by another
     converter, since it's order may not be known. Check for readable save text or a known
     marker instead (`ZELDAZ`, `Mario Story`).

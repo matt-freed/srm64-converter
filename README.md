@@ -75,6 +75,7 @@ srm64 inspect Game.eep                                         # size, status an
 srm64 split "Game.srm" [-o DIR] [--skip-byte-swap] [-f]              # writes Game.eep / .sra / .fla / .mpk
 srm64 pack Game.sra [Game.mpk ...] [-o OUT.srm] [--skip-byte-swap] [-f]  # writes Game.srm
 srm64 insert "Game.srm" Game.mpk [--slot N] [-o OUT.srm] [--skip-byte-swap] [-f]  # add files to an existing .srm
+srm64 swap Game.sra [--mode full|byte|word] [-o OUT] [-f]                # change a native file's byte order
 ```
 
 - **Split** writes only the regions that hold data (`--all` writes every region). Pak 1
@@ -102,6 +103,11 @@ srm64 insert "Game.srm" Game.mpk [--slot N] [-o OUT.srm] [--skip-byte-swap] [-f]
   `srm64 inspect` on it. It shows the first line of readable text:
   `Mario Story 006.` is cartridge order, and `iraMtS o yro.600` is Mupen64Plus order.
   Not every game stores text, so this doesn't work for every save.
+- **Swap** changes the byte order of native files (`.eep`, `.sra`, `.fla`, `.mpk`) after
+  the fact, for files another tool wrote in a different order. `--mode full` (default)
+  reverses each 4-byte word (`ABCD` → `DCBA`), the same swap `split`/`pack` apply.
+  `byte` swaps each pair of bytes (`BADC`), and `word` swaps the two 16-bit halves
+  (`CDAB`). Files are updated in place. Running the same command again undoes it.
 - **Pak slots** (`pack` and `insert`): each `.mpk` goes in the first slot that applies:
   1. `--slot N` (1–4), if given. This only works with a single `.mpk` file.
   2. N from a `GAME.N.mpk` file name.

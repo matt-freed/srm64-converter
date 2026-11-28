@@ -36,11 +36,54 @@ func (o ByteOrder) Swapped(k Kind) bool {
 	return o == Hardware && (k == SRA || k == FLA)
 }
 
-// WordSwap reverses the bytes of each 32-bit word of b in place. len(b) must
-// be a multiple of 4. It is its own inverse.
-func WordSwap(b []byte) {
+// SwapMode is a byte-order transform applied to each 32-bit word, shown for
+// the bytes A B C D. Every mode is its own inverse. Native file sizes are all
+// multiples of 4.
+type SwapMode int
+
+const (
+	// SwapFull is a full 32-bit endian reversal: A B C D -> D C B A. It is
+	// the swap between cartridge order and the .srm (see ByteOrder).
+	SwapFull SwapMode = iota
+	// SwapBytes swaps the bytes of each 16-bit half: A B C D -> B A D C.
+	SwapBytes
+	// SwapWords swaps the two 16-bit halves: A B C D -> C D A B.
+	SwapWords
+)
+
+// String returns the mode's name as used on the command line.
+func (m SwapMode) String() string {
+	return [...]string{"full", "byte", "word"}[m]
+}
+
+// Pattern shows what the mode does to the bytes A B C D.
+func (m SwapMode) Pattern() string {
+	return [...]string{"ABCD -> DCBA", "ABCD -> BADC", "ABCD -> CDAB"}[m]
+}
+
+// ParseSwapMode parses "full", "byte" or "word".
+func ParseSwapMode(s string) (SwapMode, error) {
+	for m := SwapFull; m <= SwapWords; m++ {
+		if s == m.String() {
+			return m, nil
+		}
+	}
+	return 0, fmt.Errorf("unknown swap mode %q (want full, byte or word)", s)
+}
+
+// Swap applies m to b in place, one 32-bit word at a time. Trailing bytes
+// that don't fill a word are left alone.
+func Swap(b []byte, m SwapMode) {
 	for i := 0; i+3 < len(b); i += 4 {
-		b[i], b[i+1], b[i+2], b[i+3] = b[i+3], b[i+2], b[i+1], b[i]
+		w := b[i : i+4 : i+4]
+		switch m {
+		case SwapFull:
+			w[0], w[1], w[2], w[3] = w[3], w[2], w[1], w[0]
+		case SwapBytes:
+			w[0], w[1], w[2], w[3] = w[1], w[0], w[3], w[2]
+		case SwapWords:
+			w[0], w[1], w[2], w[3] = w[2], w[3], w[0], w[1]
+		}
 	}
 }
 
@@ -57,7 +100,7 @@ func (img *Image) Native(r Region, eepSize int, o ByteOrder) []byte {
 	}
 	b = bytes.Clone(b)
 	if o.Swapped(r.Kind) {
-		WordSwap(b)
+		Swap(b, SwapFull)
 	}
 	return b
 }
@@ -171,7 +214,7 @@ func (img *Image) Place(k Kind, slot int, data []byte, o ByteOrder) ([]Region, e
 	}
 	if o.Swapped(k) {
 		data = bytes.Clone(data)
-		WordSwap(data)
+		Swap(data, SwapFull)
 	}
 	if k == MPK && len(data) == MPK4Size {
 		var rs []Region

@@ -210,6 +210,20 @@ slot instead. To replace pak 1, use `--slot 1` or name the file `Game.1.mpk`.
 Blank pak: either port `format_mempak()` to Go, or embed a 32 KB blank-pak template
 taken from an unused slot of a real `.srm`. This tool embeds a template.
 
+### Swap (native → native)
+Apply one byte-order transform to every 32-bit word of a native file, for files another
+tool wrote in a different order:
+
+| Mode | `A B C D` becomes | |
+|---|---|---|
+| `full` (default) | `D C B A` | full 32-bit endian reversal; the swap Split/Pack apply to SRAM/FlashRAM |
+| `byte` | `B A D C` | swaps the bytes of each 16-bit half |
+| `word` | `C D A B` | swaps the two 16-bit halves |
+
+`full` equals `byte` then `word`. Every mode is its own inverse. It works on all four
+native types, with sizes checked as in *Native sizes*. An `.srm` is rejected, because
+swapping all of it would scramble the EEPROM and pak regions, which are never swapped.
+
 ### Inspect
 For an `.srm`, report the file size and validity, then for each region its offset,
 whether it is in use, the non-`0xFF` byte count, and the guessed EEPROM size. For each

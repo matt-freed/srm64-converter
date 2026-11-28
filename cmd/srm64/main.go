@@ -47,7 +47,7 @@ func newRoot(out io.Writer) *cobra.Command {
 	root.SetVersionTemplate("srm64 {{.Version}}\n")
 	root.SetOut(out)
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
-	root.AddCommand(inspectCmd(), splitCmd(), packCmd(), insertCmd(), &cobra.Command{
+	root.AddCommand(inspectCmd(), splitCmd(), packCmd(), insertCmd(), swapCmd(), &cobra.Command{
 		Use:   "version",
 		Short: "Show the version",
 		Args:  args(cobra.NoArgs),

@@ -411,15 +411,37 @@ func TestAssignPakSlots(t *testing.T) {
 	}
 }
 
-func TestWordSwap(t *testing.T) {
-	b := []byte("ABCDEFGH")
-	WordSwap(b)
-	if string(b) != "DCBAHGFE" {
-		t.Errorf("WordSwap = %q, want DCBAHGFE", b)
+func TestSwap(t *testing.T) {
+	for _, c := range []struct {
+		m    SwapMode
+		want string
+	}{
+		{SwapFull, "DCBAHGFE"},
+		{SwapBytes, "BADCFEHG"},
+		{SwapWords, "CDABGHEF"},
+	} {
+		b := []byte("ABCDEFGH")
+		Swap(b, c.m)
+		if string(b) != c.want {
+			t.Errorf("%s: got %q, want %q", c.m, b, c.want)
+		}
+		Swap(b, c.m)
+		if string(b) != "ABCDEFGH" {
+			t.Errorf("%s twice: got %q, want the original", c.m, b)
+		}
+		if m, err := ParseSwapMode(c.m.String()); err != nil || m != c.m {
+			t.Errorf("ParseSwapMode(%q) = %v, %v", c.m, m, err)
+		}
 	}
-	WordSwap(b)
-	if string(b) != "ABCDEFGH" {
-		t.Errorf("WordSwap twice = %q, want the original", b)
+	// full = byte then word, the reason a tool with separate options needs both.
+	b := []byte("ABCD")
+	Swap(b, SwapBytes)
+	Swap(b, SwapWords)
+	if string(b) != "DCBA" {
+		t.Errorf("byte+word = %q, want DCBA", b)
+	}
+	if _, err := ParseSwapMode("endian"); err == nil {
+		t.Error(`ParseSwapMode("endian") succeeded`)
 	}
 }
 
@@ -441,7 +463,7 @@ func TestByteOrder(t *testing.T) {
 		data := randBytes(uint64(c.k)+60, c.n)
 		orig := bytes.Clone(data)
 		swapped := bytes.Clone(data)
-		WordSwap(swapped)
+		Swap(swapped, SwapFull)
 
 		hw := Blank()
 		if _, err := hw.Place(c.k, 1, data, Hardware); err != nil {
@@ -527,7 +549,7 @@ func TestFirstTextLineBothOrders(t *testing.T) {
 	hw := bytes.Repeat([]byte{0xFF}, 0x100)
 	copy(hw[0x40:], "Mario Story 006\x00")
 	mupen := bytes.Clone(hw)
-	WordSwap(mupen)
+	Swap(mupen, SwapFull)
 
 	off1, line1, ok1 := FirstTextLine(hw)
 	off2, line2, ok2 := FirstTextLine(mupen)

@@ -534,6 +534,87 @@ func TestInspectText(t *testing.T) {
 	}
 }
 
+// TestSwapCommand checks each mode's bytes on disk, that running it twice
+// restores the file, -o, and that a bad file stops the batch before any write.
+func TestSwapCommand(t *testing.T) {
+	dir := t.TempDir()
+	orig := bytes.Repeat([]byte("ABCD"), 0x8000/4)
+	sra := filepath.Join(dir, "g.sra")
+
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "DCBA"}, // default is full
+		{[]string{"--mode", "full"}, "DCBA"},
+		{[]string{"--mode", "byte"}, "BADC"},
+		{[]string{"--mode", "word"}, "CDAB"},
+	} {
+		os.WriteFile(sra, orig, 0o644)
+		args := append(append([]string{"swap"}, c.args...), sra)
+		if _, err := run(t, args...); err != nil {
+			t.Fatal(err)
+		}
+		if b, _ := os.ReadFile(sra); !bytes.Equal(b, bytes.Repeat([]byte(c.want), 0x8000/4)) {
+			t.Errorf("%v: got %q..., want %q...", c.args, b[:4], c.want)
+		}
+		if _, err := run(t, args...); err != nil {
+			t.Fatal(err)
+		}
+		if b, _ := os.ReadFile(sra); !bytes.Equal(b, orig) {
+			t.Errorf("%v twice did not restore the file", c.args)
+		}
+	}
+
+	// Every native type is accepted.
+	for name, n := range map[string]int{"g.eep": 512, "g.fla": 0x20000, "g.mpk": 0x8000} {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, bytes.Repeat([]byte("ABCD"), n/4), 0o644)
+		if _, err := run(t, "swap", p); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+
+	// -o leaves the input alone and won't overwrite without -f.
+	os.WriteFile(sra, orig, 0o644)
+	out := filepath.Join(dir, "out.sra")
+	if _, err := run(t, "swap", sra, "-o", out); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(sra); !bytes.Equal(b, orig) {
+		t.Error("swap -o modified the input")
+	}
+	if _, err := run(t, "swap", sra, "-o", out); err == nil {
+		t.Error("swap -o overwrote without -f")
+	}
+	if _, err := run(t, "swap", sra, "-o", out, "-f"); err != nil {
+		t.Errorf("swap -o -f: %v", err)
+	}
+
+	// A bad second file stops everything before the first is written.
+	bad := filepath.Join(dir, "bad.fla")
+	os.WriteFile(bad, make([]byte, 100), 0o644)
+	if _, err := run(t, "swap", sra, bad); err == nil {
+		t.Error("swap accepted a wrong-sized file")
+	}
+	if b, _ := os.ReadFile(sra); !bytes.Equal(b, orig) {
+		t.Error("swap wrote the first file although the second was bad")
+	}
+
+	var ue usageError
+	srmPath := filepath.Join(dir, "g.srm")
+	os.WriteFile(srmPath, make([]byte, 296960), 0o644)
+	for _, a := range [][]string{
+		{"swap", srmPath},
+		{"swap", "--mode", "endian", sra},
+		{"swap", "-o", out, sra, sra},
+	} {
+		if _, err := run(t, a...); !errors.As(err, &ue) {
+			t.Errorf("%v: err = %v, want a usage error", a, err)
+		}
+	}
+}
+
 func TestCLIErrors(t *testing.T) {
 	dir := t.TempDir()
 	eep := filepath.Join(dir, "input.eep") // split of g.srm writes g.eep beside it
