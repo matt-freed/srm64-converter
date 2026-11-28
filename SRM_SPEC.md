@@ -96,6 +96,12 @@ and the `.srm` therefore means reversing each 4-byte word. The operation is its 
 inverse. `.sra`/`.fla` files already in Mupen64Plus order (standalone Mupen64Plus, or
 tools that copy the region without swapping) are copied as stored.
 
+**Kind of swap:** a full 32-bit endian reversal, `A B C D` → `D C B A`, the same as
+converting between `.z64` and `.n64` ROMs. It is not a 16-bit byte swap (`B A D C`, as
+with `.v64` ROMs), and it is not a halfword swap (`C D A B`). It equals doing both of
+those, so a tool with separate "byte swap" and "word swap" options needs both enabled.
+Only the full reversal turns the stored data back into the known save markers.
+
 `S8` depends on the host. A `.srm` written on a big-endian machine would hold
 SRAM/FlashRAM in natural order. Every platform RetroArch commonly runs on is
 little-endian, so this spec assumes the swapped layout.
